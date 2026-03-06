@@ -11,9 +11,9 @@ git clone git@github.com:84codes/local-review.git ~/.local/share/local-review
 ~/.local/share/local-review/local-review setup
 ```
 
-This symlinks `local-review` into `~/.local/bin`. Make sure `~/.local/bin` is on your PATH.
+This symlinks `local-review` into `~/.local/bin` and installs `/local-review` and `/local-review-fix` slash commands into `~/.claude/commands/`. Make sure `~/.local/bin` is on your PATH.
 
-To update, `git pull` in `~/.local/share/local-review`.
+To update, `git pull` in `~/.local/share/local-review` and re-run `local-review setup`.
 
 ## Repo setup
 
@@ -30,13 +30,11 @@ This creates thin wrappers (2-line scripts that call `local-review`) and default
 | File | Purpose |
 |------|---------|
 | `.githooks/pre-push` | Wrapper: `exec local-review hook` (git needs a file) |
-| `.claude/commands/local-review.md` | `/local-review` slash command for Claude Code |
-| `.claude/commands/local-review-fix.md` | `/local-review-fix` review-fix loop for Claude Code |
 | `.claude/review-criteria.md` | Review criteria (for Claude CLI + Claude Code) |
 | `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |
 
-All logic lives in the `local-review` command. The hook wrapper exists because git needs a file at the hooks path.
+All logic lives in the `local-review` command. Slash commands (`/local-review`, `/local-review-fix`) are installed globally by `local-review setup`.
 
 ### Hook manager integration
 
