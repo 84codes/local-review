@@ -91,6 +91,16 @@ Inside Claude Code, use the slash commands:
 
 The in-session commands are better than the CLI path: Claude Code can read source files to verify findings and make surgical edits.
 
+## Why not use the official code-review plugin?
+
+Claude Code ships with an official `/code-review` plugin (and the `pr-review-toolkit`). These are great for deep, multi-agent PR reviews with confidence scoring and deduplication. But they solve a different problem.
+
+`local-review` exists to give you **one review voice across every surface**: pre-push hooks, CLI, in-session slash commands, and CI. Same criteria, same quality bar, same behavior. The official plugins have their own opinions baked in (5 parallel agents, their own scoring rubric, CLAUDE.md-focused). You can't tell them "only report things you'd block a PR for" or feed them your repo's review criteria file.
+
+They coexist well:
+- **`local-review`** for the everyday flow: hooks, quick CLI reviews, `/local-review` in-session
+- **`/code-review`** for deep-dive reviews when you want the full multi-agent treatment
+
 ## Backend selection
 
 Supports `claude` and `copilot` as backends. Selection order:
