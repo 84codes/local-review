@@ -2,7 +2,7 @@
 
 AI-powered local code review for git repos. Supports Claude, Codex, Gemini, OpenCode, and Copilot as review backends.
 
-Catches bugs, security issues, and logic errors before code hits a PR. Runs as a pre-push hook or standalone script.
+Catches bugs, security issues, and logic errors before code hits a PR. Runs as a pre-push hook or standalone CLI.
 
 ## Developer setup (one-time)
 
@@ -11,7 +11,7 @@ git clone git@github.com:84codes/local-review.git ~/.local/share/local-review
 ~/.local/share/local-review/local-review setup
 ```
 
-This symlinks `local-review` into `~/.local/bin` and installs `/local-review` and `/local-review-fix` slash commands into `~/.claude/commands/`. Make sure `~/.local/bin` is on your PATH.
+This symlinks `local-review` into `~/.local/bin` and installs `/local-review` and `/local-review-fix` slash commands into `~/.claude/commands/` (Claude Code only). Make sure `~/.local/bin` is on your PATH.
 
 To update, `git pull` in `~/.local/share/local-review` and re-run `local-review setup`.
 
@@ -23,18 +23,18 @@ From the target repo:
 local-review install
 ```
 
-This creates thin wrappers (2-line scripts that call `local-review`) and default config files. Won't overwrite existing files (use `--force` to replace).
+Creates config files and a pre-push hook wrapper. Won't overwrite existing files (use `--force` to replace).
 
 ### What gets created
 
 | File | Purpose |
 |------|---------|
-| `.githooks/pre-push` | Wrapper: `exec local-review hook` (git needs a file) |
-| `.claude/review-criteria.md` | Review criteria (for Claude CLI + Claude Code) |
+| `.githooks/pre-push` | Hook wrapper (exits cleanly if local-review isn't installed) |
+| `.claude/review-criteria.md` | Review criteria |
 | `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |
 
-All logic lives in the `local-review` command. Slash commands (`/local-review`, `/local-review-fix`) are installed globally by `local-review setup`.
+The generated hook wrapper includes a guard: if `local-review` isn't installed, the hook exits 0 and the push proceeds normally. This means the hook file can be committed to the repo without affecting developers who haven't installed local-review.
 
 ### Hook manager integration
 
@@ -42,15 +42,13 @@ The installer detects existing hook managers:
 
 | Manager | What happens |
 |---------|--------------|
-| **husky** (`.husky/` exists) | Creates/appends `.husky/pre-push` calling `local-review hook` |
+| **husky** (`.husky/` exists) | Creates/appends `.husky/pre-push` with guarded `local-review hook` call |
 | **overcommit** (`.overcommit.yml` exists) | Adds `PrePush: LocalReview` to `.overcommit.yml` |
 | **None** | Creates `.githooks/pre-push` + sets `git config core.hooksPath .githooks` |
 
 ## Usage
 
-### Standalone review
-
-Running without a subcommand defaults to `review`:
+Running without a subcommand defaults to review:
 
 ```sh
 local-review                              # review local changes vs origin/main
@@ -83,9 +81,9 @@ local-review --fix 42           # checkout and fix a PR
 
 Each iteration: review the diff, fix findings, re-review. Stops when "No issues found" or max iterations reached. Requires an agentic backend (claude, codex, gemini, or opencode).
 
-### Claude Code (`/local-review`)
+### Claude Code slash commands
 
-Inside Claude Code, use the slash commands:
+`local-review setup` installs slash commands into `~/.claude/commands/`. These only work inside Claude Code sessions.
 
 ```
 /local-review          # review local changes (full codebase access)
@@ -96,11 +94,11 @@ Inside Claude Code, use the slash commands:
 
 The in-session commands are better than the CLI path: Claude Code can read source files to verify findings and make surgical edits.
 
-## Why not use the official code-review plugin?
+## Design: one review voice everywhere
 
 Claude Code ships with an official `/code-review` plugin (and the `pr-review-toolkit`). These are great for deep, multi-agent PR reviews with confidence scoring and deduplication. But they solve a different problem.
 
-`local-review` exists to give you **one review voice across every surface**: pre-push hooks, CLI, in-session slash commands, and CI. Same criteria, same quality bar, same behavior. The official plugins have their own opinions baked in (5 parallel agents, their own scoring rubric, CLAUDE.md-focused). You can't tell them "only report things you'd block a PR for" or feed them your repo's review criteria file.
+`local-review` gives you **one review voice across every surface**: pre-push hooks, CLI, and in-session slash commands. Same criteria, same quality bar, same behavior. The official plugins have their own opinions baked in (5 parallel agents, their own scoring rubric, CLAUDE.md-focused). You can't tell them "only report things you'd block a PR for" or feed them your repo's review criteria.
 
 They coexist well:
 - **`local-review`** for the everyday flow: hooks, quick CLI reviews, `/local-review` in-session
