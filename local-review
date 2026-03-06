@@ -194,13 +194,6 @@ exec local-review hook "$@"
 SH
 )
 
-  local review_wrapper
-  review_wrapper=$(cat <<'SH'
-#!/usr/bin/env bash
-exec local-review review "$@"
-SH
-)
-
   case "$hook_manager" in
     husky)
       local husky_file="$root/.husky/pre-push"
@@ -251,9 +244,6 @@ YAML
       fi
       ;;
   esac
-
-  # --- Thin wrapper: extras/review ---
-  install_wrapper "extras/review" "$review_wrapper"
 
   # --- Config files (repo-specific, won't overwrite) ---
   install_config() {

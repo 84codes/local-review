@@ -29,15 +29,14 @@ This creates thin wrappers (2-line scripts that call `local-review`) and default
 
 | File | Purpose |
 |------|---------|
-| `.githooks/pre-push` | Wrapper: `exec local-review hook` |
-| `extras/review` | Wrapper: `exec local-review review` |
+| `.githooks/pre-push` | Wrapper: `exec local-review hook` (git needs a file) |
 | `.claude/commands/local-review.md` | `/local-review` slash command for Claude Code |
 | `.claude/commands/local-review-fix.md` | `/local-review-fix` review-fix loop for Claude Code |
 | `.claude/review-criteria.md` | Review criteria (for Claude CLI + Claude Code) |
 | `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |
 
-The wrappers are tiny and don't drift. All logic lives in the `local-review` command.
+All logic lives in the `local-review` command. The hook wrapper exists because git needs a file at the hooks path.
 
 ### Hook manager integration
 
@@ -57,13 +56,6 @@ The installer detects existing hook managers:
 local-review review              # review local changes vs origin/main
 local-review review 42           # review PR #42
 local-review review --raw        # raw markdown output (no pager)
-```
-
-Or via the repo wrapper:
-
-```sh
-extras/review
-extras/review 42
 ```
 
 ### Pre-push hook
