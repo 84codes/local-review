@@ -31,6 +31,7 @@ This creates thin wrappers (2-line scripts that call `local-review`) and default
 |------|---------|
 | `.githooks/pre-push` | Wrapper: `exec local-review hook` |
 | `extras/review` | Wrapper: `exec local-review review` |
+| `.claude/commands/review.md` | `/review` slash command for Claude Code |
 | `.claude/review-criteria.md` | Review criteria (for Claude CLI + Claude Code) |
 | `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |
@@ -73,6 +74,17 @@ Triggers automatically on `git push`. Asks before running. If issues are found, 
 3. Address interactively (pipes findings into claude/copilot for follow-up)
 
 Inside a Claude Code session, the hook emits the diff to stderr so Claude Code picks it up for interactive review.
+
+### Claude Code (`/review`)
+
+Inside Claude Code, use the slash command:
+
+```
+/review          # review local changes
+/review 42       # review PR #42
+```
+
+This reviews in-session with full codebase access. Unlike the CLI path (which only sees the diff), Claude Code can read source files to verify findings before reporting them. Same criteria, better context.
 
 ## Backend selection
 
