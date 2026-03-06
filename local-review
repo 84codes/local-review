@@ -621,6 +621,8 @@ cmd_hook() {
       *) exit 1 ;;
     esac
   fi
+
+  exit 0
 }
 
 # --- Main dispatch ---

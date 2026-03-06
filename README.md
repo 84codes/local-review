@@ -81,9 +81,9 @@ local-review --fix 42           # checkout and fix a PR
 
 Each iteration: review the diff, fix findings, re-review. Stops when "No issues found" or max iterations reached. Requires an agentic backend (claude, codex, gemini, or opencode).
 
-### Claude Code slash commands
+### Slash commands (Claude Code / Copilot)
 
-`local-review setup` installs slash commands into `~/.claude/commands/`. These only work inside Claude Code sessions.
+`local-review setup` installs slash commands into `~/.claude/commands/`. These work in Claude Code and GitHub Copilot sessions.
 
 ```
 /local-review          # review local changes (full codebase access)
