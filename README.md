@@ -30,9 +30,11 @@ Creates config files and a pre-push hook wrapper. Won't overwrite existing files
 | File | Purpose |
 |------|---------|
 | `.githooks/pre-push` | Hook wrapper (exits cleanly if local-review isn't installed) |
-| `.claude/review-criteria.md` | Review criteria |
-| `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
+| `.review-config` | Config file with `CRITERIA=<path>` and optional `REVIEWER=` |
+| `.claude/review-criteria.md` | Review criteria (only if no existing criteria file found) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |
+
+The installer auto-detects existing criteria files in this order: `.claude/review-criteria.md`, `.github/copilot-instructions.md`, `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, `.claude/CLAUDE.md`. If one is found, it records the path in `.review-config`. If none exist, it creates `.claude/review-criteria.md` with sensible defaults.
 
 The generated hook wrapper includes a guard: if `local-review` isn't installed, the hook exits 0 and the push proceeds normally. This means the hook file can be committed to the repo without affecting developers who haven't installed local-review.
 
@@ -129,5 +131,5 @@ Supports `claude`, `codex`, `gemini`, `opencode`, and `copilot` as backends. Sel
 |---------|-----------------|
 | Review backend | `--reviewer=claude`, `REVIEWER=claude` in `.review-config` or env var |
 | Model | `--model=claude-opus-4-6`, or `.claude/review-model` file (claude, codex, gemini) |
-| Review criteria | `--criteria=FILE`, or `.claude/review-criteria.md` (built-in defaults when absent) |
+| Review criteria | `--criteria=FILE`, or `CRITERIA=<path>` in `.review-config` (built-in defaults when absent) |
 | Base branch | `REVIEW_BASE_BRANCH=develop` env var (default: `main`) |

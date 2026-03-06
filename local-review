@@ -52,17 +52,20 @@ resolve_backend() {
 
 load_criteria() {
   local root="$1"
-  if [[ -f "$root/.claude/review-criteria.md" ]]; then
-    cat "$root/.claude/review-criteria.md"
-  elif [[ -f "$root/.github/review-criteria.md" ]]; then
-    cat "$root/.github/review-criteria.md"
-  else
-    # Fall back to the default criteria shipped with local-review
-    local source_dir
-    source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    if [[ -f "$source_dir/criteria.md" ]]; then
-      cat "$source_dir/criteria.md"
+  # Read criteria path from .review-config
+  if [[ -f "$root/.review-config" ]]; then
+    local criteria_path
+    criteria_path=$(grep -E '^CRITERIA=' "$root/.review-config" | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+    if [[ -n "$criteria_path" ]] && [[ -f "$root/$criteria_path" ]]; then
+      cat "$root/$criteria_path"
+      return
     fi
+  fi
+  # Fall back to the default criteria shipped with local-review
+  local source_dir
+  source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  if [[ -f "$source_dir/criteria.md" ]]; then
+    cat "$source_dir/criteria.md"
   fi
 }
 
@@ -303,22 +306,65 @@ YAML
       ;;
   esac
 
-  # --- Config files (repo-specific, won't overwrite) ---
-  install_config() {
-    local src="$1" dest="$2"
-    local dest_path="$root/$dest"
-    if [[ -f "$dest_path" ]] && [[ "$force" != true ]]; then
-      skipped+=("$dest (already exists)")
-      return
+  # --- Review criteria file ---
+  # Auto-detect existing criteria, or create one
+  local criteria_path=""
+  local -a known_criteria=(
+    ".claude/review-criteria.md"
+    ".github/copilot-instructions.md"
+    "AGENTS.md"
+    "GEMINI.md"
+    "CLAUDE.md"
+    ".claude/CLAUDE.md"
+  )
+
+  # Check if CRITERIA is already configured
+  if [[ -f "$root/.review-config" ]]; then
+    local existing
+    existing=$(grep -E '^CRITERIA=' "$root/.review-config" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+    if [[ -n "$existing" ]] && [[ -f "$root/$existing" ]]; then
+      criteria_path="$existing"
+      skipped+=("criteria ($criteria_path already configured in .review-config)")
     fi
-    mkdir -p "$(dirname "$dest_path")"
-    cp "$src" "$dest_path"
-    installed+=("$dest")
-  }
+  fi
 
-  install_config "$source_dir/criteria.md" ".claude/review-criteria.md"
-  install_config "$source_dir/criteria.md" ".github/copilot-instructions.md"
+  # Auto-detect existing criteria files
+  if [[ -z "$criteria_path" ]]; then
+    for candidate in "${known_criteria[@]}"; do
+      if [[ -f "$root/$candidate" ]]; then
+        criteria_path="$candidate"
+        installed+=("criteria (auto-detected $criteria_path)")
+        break
+      fi
+    done
+  fi
 
+  # Nothing found: create default criteria file
+  if [[ -z "$criteria_path" ]]; then
+    criteria_path=".claude/review-criteria.md"
+    local dest_path="$root/$criteria_path"
+    if [[ -f "$dest_path" ]] && [[ "$force" != true ]]; then
+      skipped+=("$criteria_path (already exists)")
+    else
+      mkdir -p "$(dirname "$dest_path")"
+      cp "$source_dir/criteria.md" "$dest_path"
+      installed+=("$criteria_path")
+    fi
+  fi
+
+  # --- .review-config ---
+  local config_file="$root/.review-config"
+  if [[ ! -f "$config_file" ]]; then
+    printf 'CRITERIA=%s\n' "$criteria_path" > "$config_file"
+    installed+=(".review-config")
+  elif ! grep -qE '^CRITERIA=' "$config_file"; then
+    printf '\nCRITERIA=%s\n' "$criteria_path" >> "$config_file"
+    installed+=(".review-config (added CRITERIA)")
+  else
+    skipped+=(".review-config CRITERIA (already set)")
+  fi
+
+  # --- Claude model file ---
   if [[ ! -f "$root/.claude/review-model" ]] || [[ "$force" == true ]]; then
     mkdir -p "$root/.claude"
     echo "claude-sonnet-4-6" > "$root/.claude/review-model"
@@ -346,8 +392,8 @@ YAML
     done
   fi
   echo ""
-  echo "Configure backend in .review-config: REVIEWER=claude (or codex, gemini, opencode, copilot)"
-  echo "Or use --reviewer flag, REVIEWER env var, or auto-detect."
+  echo "Review criteria: $criteria_path"
+  echo "Configure backend: REVIEWER=claude in .review-config (or codex, gemini, opencode, copilot)"
 }
 
 # --- Subcommand: review ---
