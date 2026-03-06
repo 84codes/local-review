@@ -82,9 +82,13 @@ resolve_model() {
     echo "$model_override"
     return
   fi
-  local model_file="$root/.claude/review-model"
-  if [[ -f "$model_file" ]]; then
-    tr -d '[:space:]' < "$model_file"
+  if [[ -f "$root/.review-config" ]]; then
+    local val
+    val=$(grep -E '^MODEL=' "$root/.review-config" | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+    if [[ -n "$val" ]]; then
+      echo "$val"
+      return
+    fi
   fi
 }
 
@@ -355,22 +359,21 @@ YAML
   # --- .review-config ---
   local config_file="$root/.review-config"
   if [[ ! -f "$config_file" ]]; then
-    printf 'CRITERIA=%s\n' "$criteria_path" > "$config_file"
+    printf 'CRITERIA=%s\nMODEL=claude-sonnet-4-6\n' "$criteria_path" > "$config_file"
     installed+=(".review-config")
-  elif ! grep -qE '^CRITERIA=' "$config_file"; then
-    printf '\nCRITERIA=%s\n' "$criteria_path" >> "$config_file"
-    installed+=(".review-config (added CRITERIA)")
   else
-    skipped+=(".review-config CRITERIA (already set)")
-  fi
-
-  # --- Claude model file ---
-  if [[ ! -f "$root/.claude/review-model" ]] || [[ "$force" == true ]]; then
-    mkdir -p "$root/.claude"
-    echo "claude-sonnet-4-6" > "$root/.claude/review-model"
-    installed+=(".claude/review-model")
-  else
-    skipped+=(".claude/review-model (already exists)")
+    if ! grep -qE '^CRITERIA=' "$config_file"; then
+      printf '\nCRITERIA=%s\n' "$criteria_path" >> "$config_file"
+      installed+=(".review-config (added CRITERIA)")
+    else
+      skipped+=(".review-config CRITERIA (already set)")
+    fi
+    if ! grep -qE '^MODEL=' "$config_file"; then
+      printf 'MODEL=claude-sonnet-4-6\n' >> "$config_file"
+      installed+=(".review-config (added MODEL)")
+    else
+      skipped+=(".review-config MODEL (already set)")
+    fi
   fi
 
   # --- Summary ---
