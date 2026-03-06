@@ -73,30 +73,49 @@ build_input() {
   printf '```'
 }
 
+resolve_model() {
+  local model_override="$1" root="$2"
+  if [[ -n "$model_override" ]]; then
+    echo "$model_override"
+    return
+  fi
+  local model_file="$root/.claude/review-model"
+  if [[ -f "$model_file" ]]; then
+    tr -d '[:space:]' < "$model_file"
+  fi
+}
+
 run_backend() {
-  local backend="$1" prompt="$2" diff_file="$3" root="$4"
+  local backend="$1" prompt="$2" diff_file="$3" root="$4" model="${5:-}"
 
   case "$backend" in
     claude)
-      local model_flag=""
-      local model_file="$root/.claude/review-model"
-      if [[ -f "$model_file" ]]; then
-        local model
-        model=$(tr -d '[:space:]' < "$model_file")
-        model_flag="--model $model"
+      local flags=""
+      if [[ -n "$model" ]]; then
+        flags="--model $model"
       fi
       unset CLAUDECODE
       # shellcheck disable=SC2086
       build_input "$prompt" "$diff_file" \
-        | claude -p --no-session-persistence --effort medium $model_flag
+        | claude -p --no-session-persistence --effort medium $flags
       ;;
     codex)
-      build_input "$prompt" "$diff_file" \
-        | codex exec -
+      if [[ -n "$model" ]]; then
+        build_input "$prompt" "$diff_file" \
+          | codex exec -c model="\"$model\"" -
+      else
+        build_input "$prompt" "$diff_file" \
+          | codex exec -
+      fi
       ;;
     gemini)
+      local flags=""
+      if [[ -n "$model" ]]; then
+        flags="-m $model"
+      fi
+      # shellcheck disable=SC2086
       build_input "$prompt" "$diff_file" \
-        | gemini -p -
+        | gemini -p $flags -
       ;;
     opencode)
       build_input "$prompt" "$diff_file" \
@@ -338,17 +357,26 @@ cmd_review() {
   local max_iterations=5
   local pr_number=""
   local reviewer_flag=""
+  local model_flag=""
+  local criteria_flag=""
   for arg in "$@"; do
     case "$arg" in
       --raw) raw=true ;;
       --fix) fix=true ;;
       --max=*) max_iterations="${arg#--max=}" ;;
       --reviewer=*) reviewer_flag="${arg#--reviewer=}" ;;
+      --model=*) model_flag="${arg#--model=}" ;;
+      --criteria=*) criteria_flag="${arg#--criteria=}" ;;
       -h|--help)
-        echo "Usage: $PROG review [--raw] [--fix [--max=N]] [--reviewer=BACKEND] [PR_NUMBER]"
+        echo "Usage: $PROG review [OPTIONS] [PR_NUMBER]"
+        echo ""
+        echo "Options:"
         echo "  --reviewer=BACKEND  Force backend (claude, codex, gemini, opencode, copilot)"
+        echo "  --model=MODEL       Override model (backend-specific, e.g. claude-opus-4-6)"
+        echo "  --criteria=FILE     Use custom criteria file instead of auto-detected"
         echo "  --fix               Review, fix, and re-review in a loop until clean"
         echo "  --max=N             Max iterations for --fix (default: 5)"
+        echo "  --raw               Raw markdown output (no pager)"
         exit 0
         ;;
       *) pr_number="$arg" ;;
@@ -388,8 +416,19 @@ cmd_review() {
     pr_number=""
   fi
 
+  local model
+  model=$(resolve_model "$model_flag" "$root")
+
   local criteria
-  criteria=$(load_criteria "$root")
+  if [[ -n "$criteria_flag" ]]; then
+    if [[ ! -f "$criteria_flag" ]]; then
+      echo "Criteria file not found: $criteria_flag" >&2
+      exit 1
+    fi
+    criteria=$(cat "$criteria_flag")
+  else
+    criteria=$(load_criteria "$root")
+  fi
   local review_prompt="Review the following diff and report ONLY problems that need fixing.
 
 $criteria"
@@ -431,7 +470,7 @@ $criteria"
 
     # Run review
     local output
-    output=$(run_backend "$backend" "$review_prompt" "$diff_file" "$root") || {
+    output=$(run_backend "$backend" "$review_prompt" "$diff_file" "$root" "$model") || {
       echo "Review failed ($backend exited $?)" >&2
       rm -f "$diff_file"
       exit 1

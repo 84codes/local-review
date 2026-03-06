@@ -51,10 +51,12 @@ The installer detects existing hook managers:
 ### Standalone review
 
 ```sh
-local-review review                      # review local changes vs origin/main
-local-review review 42                   # review PR #42
-local-review review --raw                # raw markdown output (no pager)
-local-review review --reviewer=codex     # force a specific backend
+local-review review                              # review local changes vs origin/main
+local-review review 42                           # review PR #42
+local-review review --reviewer=codex             # force a specific backend
+local-review review --model=claude-opus-4-6      # override model
+local-review review --criteria=my-criteria.md    # use custom criteria file
+local-review review --raw                        # raw markdown output (no pager)
 ```
 
 ### Pre-push hook
@@ -126,6 +128,6 @@ Supports `claude`, `codex`, `gemini`, `opencode`, and `copilot` as backends. Sel
 | Setting | How to configure |
 |---------|-----------------|
 | Review backend | `--reviewer=claude`, `REVIEWER=claude` in `.review-config` or env var |
+| Model | `--model=claude-opus-4-6`, or `.claude/review-model` file (claude, codex, gemini) |
+| Review criteria | `--criteria=FILE`, or `.claude/review-criteria.md` (built-in defaults when absent) |
 | Base branch | `REVIEW_BASE_BRANCH=develop` env var (default: `main`) |
-| Review criteria | Edit `.claude/review-criteria.md` (built-in defaults used when absent) |
-| Claude model | Edit `.claude/review-model` |
