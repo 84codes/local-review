@@ -6,6 +6,7 @@ set -euo pipefail
 
 PROG="local-review"
 VERSION="0.1.0"
+SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 
 # --- Shared helpers ---
 
@@ -62,10 +63,8 @@ load_criteria() {
     fi
   fi
   # Fall back to the default criteria shipped with local-review
-  local source_dir
-  source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-  if [[ -f "$source_dir/criteria.md" ]]; then
-    cat "$source_dir/criteria.md"
+  if [[ -f "$SCRIPT_DIR/criteria.md" ]]; then
+    cat "$SCRIPT_DIR/criteria.md"
   fi
 }
 
@@ -173,17 +172,13 @@ cmd_setup() {
   local install_dir="${XDG_DATA_HOME:-$HOME/.local/share}/local-review"
   local bin_dir="$HOME/.local/bin"
 
-  # Resolve where this script lives (the repo checkout)
-  local source_dir
-  source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-
-  if [[ "$source_dir" == "$install_dir" ]]; then
+  if [[ "$SCRIPT_DIR" == "$install_dir" ]]; then
     echo "Already installed at $install_dir"
   else
     mkdir -p "$install_dir"
-    cp "$source_dir/local-review" "$install_dir/local-review"
+    cp "$SCRIPT_DIR/local-review" "$install_dir/local-review"
     chmod 755 "$install_dir/local-review"
-    cp "$source_dir/criteria.md" "$install_dir/criteria.md"
+    cp "$SCRIPT_DIR/criteria.md" "$install_dir/criteria.md"
     echo "Installed to $install_dir"
   fi
 
@@ -191,11 +186,11 @@ cmd_setup() {
   ln -sf "$install_dir/local-review" "$bin_dir/local-review"
   echo "Symlinked $bin_dir/local-review"
 
-  # Install Claude Code slash commands globally
+  # Install slash commands globally (works in Claude Code and Copilot)
   local commands_dir="$HOME/.claude/commands"
   mkdir -p "$commands_dir"
-  cp "$source_dir/local-review.md" "$commands_dir/local-review.md"
-  cp "$source_dir/local-review-fix.md" "$commands_dir/local-review-fix.md"
+  cp "$SCRIPT_DIR/local-review.md" "$commands_dir/local-review.md"
+  cp "$SCRIPT_DIR/local-review-fix.md" "$commands_dir/local-review-fix.md"
   echo "Installed /local-review and /local-review-fix commands to $commands_dir"
 
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$bin_dir"; then
@@ -222,10 +217,6 @@ cmd_install() {
 
   local root
   root=$(find_repo_root)
-
-  # Resolve where criteria.md lives (next to this script)
-  local source_dir
-  source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
   local installed=()
   local skipped=()
@@ -351,7 +342,7 @@ YAML
       skipped+=("$criteria_path (already exists)")
     else
       mkdir -p "$(dirname "$dest_path")"
-      cp "$source_dir/criteria.md" "$dest_path"
+      cp "$SCRIPT_DIR/criteria.md" "$dest_path"
       installed+=("$criteria_path")
     fi
   fi
