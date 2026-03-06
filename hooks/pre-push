@@ -96,19 +96,24 @@ if ! grep -qF "No issues found" "$REVIEW_FILE"; then
   echo "Issues found. What do you want to do?"
   echo "  1) Push anyway"
   echo "  2) Abort"
-  if [[ "$BACKEND" == "claude" ]]; then
-    echo "  3) Address with Claude"
-  fi
+  echo "  3) Address interactively"
   read -r -p "Choice [1-3]: " choice </dev/tty 2>/dev/tty || choice="2"
   case "$choice" in
     1) exit 0 ;;
     3)
-      if [[ "$BACKEND" == "claude" ]]; then
-        { printf 'Here are the review findings. Ask me what to address.\n\n'; cat "$REVIEW_FILE"; } | claude
-        echo "When ready, run: git push --no-verify" >&2
-        exit 1
-      fi
-      ;&
+      case "$BACKEND" in
+        claude)
+          { printf 'Here are the review findings. Ask me what to address.\n\n'; cat "$REVIEW_FILE"; } | claude
+          ;;
+        copilot)
+          copilot_cmd="copilot"
+          command -v copilot &>/dev/null || copilot_cmd="gh copilot"
+          { printf 'Here are the review findings. Ask me what to address.\n\n'; cat "$REVIEW_FILE"; } | $copilot_cmd
+          ;;
+      esac
+      echo "When ready, run: git push --no-verify" >&2
+      exit 1
+      ;;
     *) exit 1 ;;
   esac
 fi
