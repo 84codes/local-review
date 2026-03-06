@@ -261,7 +261,7 @@ YAML
     installed+=("$dest")
   }
 
-  install_config "$source_dir/review.md" ".claude/commands/review.md"
+  install_config "$source_dir/local-review.md" ".claude/commands/local-review.md"
   install_config "$source_dir/criteria.md" ".claude/review-criteria.md"
   install_config "$source_dir/criteria.md" ".github/copilot-instructions.md"
 
