@@ -1,6 +1,6 @@
 # local-review
 
-AI-powered local code review for git repos. Supports both Claude CLI and Copilot CLI as review backends.
+AI-powered local code review for git repos. Supports Claude, Codex, Gemini, OpenCode, and Copilot as review backends.
 
 Catches bugs, security issues, and logic errors before code hits a PR. Runs as a pre-push hook or standalone script.
 
@@ -51,9 +51,10 @@ The installer detects existing hook managers:
 ### Standalone review
 
 ```sh
-local-review review              # review local changes vs origin/main
-local-review review 42           # review PR #42
-local-review review --raw        # raw markdown output (no pager)
+local-review review                      # review local changes vs origin/main
+local-review review 42                   # review PR #42
+local-review review --raw                # raw markdown output (no pager)
+local-review review --reviewer=codex     # force a specific backend
 ```
 
 ### Pre-push hook
@@ -62,7 +63,7 @@ Triggers automatically on `git push`. Asks before running. If issues are found, 
 
 1. Push anyway
 2. Abort
-3. Address interactively (pipes findings into claude/copilot for follow-up)
+3. Address interactively (pipes findings into the selected backend for follow-up)
 
 Inside a Claude Code session, the hook emits the diff to stderr so Claude Code picks it up for interactive review.
 
@@ -76,7 +77,7 @@ local-review review --fix --max=3      # limit iterations
 local-review review --fix 42           # checkout and fix a PR
 ```
 
-Each iteration: review the diff, fix findings, re-review. Stops when "No issues found" or max iterations reached. Requires the claude backend.
+Each iteration: review the diff, fix findings, re-review. Stops when "No issues found" or max iterations reached. Requires an agentic backend (claude, codex, gemini, or opencode).
 
 ### Claude Code (`/local-review`)
 
@@ -103,25 +104,28 @@ They coexist well:
 
 ## Backend selection
 
-Supports `claude` and `copilot` as backends. Selection order:
+Supports `claude`, `codex`, `gemini`, `opencode`, and `copilot` as backends. Selection order:
 
-1. **Environment variable**: `REVIEWER=copilot local-review review`
-2. **Config file**: Create `.review-config` in repo root with `REVIEWER=claude`
-3. **Auto-detect**: Uses whichever CLI is installed. Prefers `claude` if both are present.
+1. **CLI flag**: `local-review review --reviewer=codex`
+2. **Environment variable**: `REVIEWER=copilot local-review review`
+3. **Config file**: Create `.review-config` in repo root with `REVIEWER=claude`
+4. **Auto-detect**: Uses the first installed CLI found (claude > codex > gemini > opencode > copilot).
 
-### Claude backend
+### Backends
 
-Pipes diff + criteria into `claude -p`. Model is read from `.claude/review-model`.
-
-### Copilot backend
-
-Pipes diff + criteria into `copilot` CLI. Falls back to `gh copilot` if the standalone binary isn't installed.
+| Backend | CLI | Non-interactive invocation | Can fix (`--fix`)? |
+|---------|-----|----------------------------|--------------------|
+| `claude` | `claude` | `claude -p` + model from `.claude/review-model` | Yes |
+| `codex` | `codex` | `codex exec -` | Yes |
+| `gemini` | `gemini` | `gemini -p -` | Yes |
+| `opencode` | `opencode` | `opencode -p -q` | Yes |
+| `copilot` | `copilot` / `gh copilot` | Pipes to stdin | No (review only) |
 
 ## Configuration
 
 | Setting | How to configure |
 |---------|-----------------|
-| Review backend | `REVIEWER=claude` in `.review-config` or env var |
+| Review backend | `--reviewer=claude`, `REVIEWER=claude` in `.review-config` or env var |
 | Base branch | `REVIEW_BASE_BRANCH=develop` env var (default: `main`) |
 | Review criteria | Edit `.claude/review-criteria.md` (built-in defaults used when absent) |
 | Claude model | Edit `.claude/review-model` |

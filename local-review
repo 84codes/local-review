@@ -18,12 +18,13 @@ find_repo_root() {
 
 resolve_backend() {
   local root="$1"
-  # 1. Environment variable
+  # 1. CLI flag (set via REVIEWER before calling)
+  # 2. Environment variable
   if [[ -n "${REVIEWER:-}" ]]; then
     echo "$REVIEWER"
     return
   fi
-  # 2. Config file in repo root
+  # 3. Config file in repo root
   if [[ -f "$root/.review-config" ]]; then
     local val
     val=$(grep -E '^REVIEWER=' "$root/.review-config" | tail -1 | cut -d= -f2 | tr -d '[:space:]')
@@ -32,14 +33,21 @@ resolve_backend() {
       return
     fi
   fi
-  # 3. Auto-detect: prefer claude, fall back to copilot
-  if command -v claude &>/dev/null; then
-    echo "claude"
-  elif command -v copilot &>/dev/null || command -v gh &>/dev/null; then
-    echo "copilot"
-  else
-    echo ""
-  fi
+  # 4. Auto-detect: prefer claude, then others
+  local -a candidates=(claude codex gemini opencode copilot)
+  for cmd in "${candidates[@]}"; do
+    case "$cmd" in
+      copilot)
+        if command -v copilot &>/dev/null || command -v gh &>/dev/null; then
+          echo "copilot"; return
+        fi ;;
+      *)
+        if command -v "$cmd" &>/dev/null; then
+          echo "$cmd"; return
+        fi ;;
+    esac
+  done
+  echo ""
 }
 
 load_criteria() {
@@ -58,6 +66,13 @@ load_criteria() {
   fi
 }
 
+build_input() {
+  local prompt="$1" diff_file="$2"
+  printf '%s\n\n```diff\n' "$prompt"
+  cat "$diff_file"
+  printf '```'
+}
+
 run_backend() {
   local backend="$1" prompt="$2" diff_file="$3" root="$4"
 
@@ -72,8 +87,20 @@ run_backend() {
       fi
       unset CLAUDECODE
       # shellcheck disable=SC2086
-      { printf '%s\n\n```diff\n' "$prompt"; cat "$diff_file"; printf '```'; } \
+      build_input "$prompt" "$diff_file" \
         | claude -p --no-session-persistence --effort medium $model_flag
+      ;;
+    codex)
+      build_input "$prompt" "$diff_file" \
+        | codex exec -
+      ;;
+    gemini)
+      build_input "$prompt" "$diff_file" \
+        | gemini -p -
+      ;;
+    opencode)
+      build_input "$prompt" "$diff_file" \
+        | opencode -p -q
       ;;
     copilot)
       local copilot_cmd="copilot"
@@ -85,11 +112,13 @@ run_backend() {
           return 1
         fi
       fi
-      { printf '%s\n\n```diff\n' "$prompt"; cat "$diff_file"; printf '```'; } \
+      # shellcheck disable=SC2086
+      build_input "$prompt" "$diff_file" \
         | $copilot_cmd
       ;;
     *)
-      echo "Unknown backend: $backend (use 'claude' or 'copilot')" >&2
+      echo "Unknown backend: $backend" >&2
+      echo "Supported: claude, codex, gemini, opencode, copilot" >&2
       return 1
       ;;
   esac
@@ -99,12 +128,14 @@ pipe_to_backend_interactive() {
   local backend="$1"
   shift
   case "$backend" in
-    claude)
-      "$@" | claude
-      ;;
+    claude)   "$@" | claude ;;
+    codex)    "$@" | codex ;;
+    gemini)   "$@" | gemini ;;
+    opencode) "$@" | opencode ;;
     copilot)
       local copilot_cmd="copilot"
       command -v copilot &>/dev/null || copilot_cmd="gh copilot"
+      # shellcheck disable=SC2086
       "$@" | $copilot_cmd
       ;;
   esac
@@ -295,8 +326,8 @@ YAML
     done
   fi
   echo ""
-  echo "Configure backend in .review-config: REVIEWER=claude or REVIEWER=copilot"
-  echo "Or set REVIEWER env var. Default: auto-detect."
+  echo "Configure backend in .review-config: REVIEWER=claude (or codex, gemini, opencode, copilot)"
+  echo "Or use --reviewer flag, REVIEWER env var, or auto-detect."
 }
 
 # --- Subcommand: review ---
@@ -306,15 +337,18 @@ cmd_review() {
   local fix=false
   local max_iterations=5
   local pr_number=""
+  local reviewer_flag=""
   for arg in "$@"; do
     case "$arg" in
       --raw) raw=true ;;
       --fix) fix=true ;;
       --max=*) max_iterations="${arg#--max=}" ;;
+      --reviewer=*) reviewer_flag="${arg#--reviewer=}" ;;
       -h|--help)
-        echo "Usage: $PROG review [--raw] [--fix [--max=N]] [PR_NUMBER]"
-        echo "  --fix   Review, fix, and re-review in a loop until clean"
-        echo "  --max=N Max iterations for --fix (default: 5)"
+        echo "Usage: $PROG review [--raw] [--fix [--max=N]] [--reviewer=BACKEND] [PR_NUMBER]"
+        echo "  --reviewer=BACKEND  Force backend (claude, codex, gemini, opencode, copilot)"
+        echo "  --fix               Review, fix, and re-review in a loop until clean"
+        echo "  --max=N             Max iterations for --fix (default: 5)"
         exit 0
         ;;
       *) pr_number="$arg" ;;
@@ -324,15 +358,20 @@ cmd_review() {
   local root
   root=$(find_repo_root)
 
+  # --reviewer flag takes highest priority
+  if [[ -n "$reviewer_flag" ]]; then
+    REVIEWER="$reviewer_flag"
+  fi
+
   local backend
   backend=$(resolve_backend "$root")
   if [[ -z "$backend" ]]; then
-    echo "No review backend found. Install claude CLI or copilot CLI." >&2
+    echo "No review backend found. Install one of: claude, codex, gemini, opencode, copilot" >&2
     exit 1
   fi
 
-  if [[ "$fix" == true ]] && [[ "$backend" != "claude" ]]; then
-    echo "The --fix flag requires the claude backend." >&2
+  if [[ "$fix" == true ]] && [[ "$backend" == "copilot" ]]; then
+    echo "The --fix flag requires an agentic backend (claude, codex, gemini, opencode)." >&2
     exit 1
   fi
 
@@ -427,13 +466,27 @@ $criteria"
       break
     fi
 
-    # Fix: pipe findings into claude
+    # Fix: pipe findings into the backend's interactive/agentic mode
     echo "Fixing issues..."
-    unset CLAUDECODE
-    printf '%s\n\n%s' \
+    local fix_prompt
+    fix_prompt=$(printf '%s\n\n%s' \
       "Fix the following review findings in the codebase. Edit the files directly. Do not explain, just fix. If a finding is a false positive, skip it." \
-      "$output" \
-      | claude --no-session-persistence || {
+      "$output")
+    case "$backend" in
+      claude)
+        unset CLAUDECODE
+        printf '%s' "$fix_prompt" | claude --no-session-persistence
+        ;;
+      codex)
+        printf '%s' "$fix_prompt" | codex exec --auto-edit -
+        ;;
+      gemini)
+        printf '%s' "$fix_prompt" | gemini --yolo -p -
+        ;;
+      opencode)
+        printf '%s' "$fix_prompt" | opencode -p -q
+        ;;
+    esac || {
       echo "Fix step failed." >&2
       exit 1
     }
