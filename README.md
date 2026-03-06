@@ -32,6 +32,7 @@ This creates thin wrappers (2-line scripts that call `local-review`) and default
 | `.githooks/pre-push` | Wrapper: `exec local-review hook` |
 | `extras/review` | Wrapper: `exec local-review review` |
 | `.claude/commands/local-review.md` | `/local-review` slash command for Claude Code |
+| `.claude/commands/local-review-fix.md` | `/local-review-fix` review-fix loop for Claude Code |
 | `.claude/review-criteria.md` | Review criteria (for Claude CLI + Claude Code) |
 | `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |
@@ -75,16 +76,30 @@ Triggers automatically on `git push`. Asks before running. If issues are found, 
 
 Inside a Claude Code session, the hook emits the diff to stderr so Claude Code picks it up for interactive review.
 
-### Claude Code (`/review`)
+### Review and fix loop
 
-Inside Claude Code, use the slash command:
+Automatically review, fix, and re-review until clean:
+
+```sh
+local-review fix               # review-fix loop (max 5 iterations)
+local-review fix --max=3       # limit iterations
+local-review fix 42            # checkout and fix a PR
+```
+
+Each iteration: review the diff, fix findings, re-review. Stops when "No issues found" or max iterations reached. Requires the claude backend.
+
+### Claude Code (`/local-review`)
+
+Inside Claude Code, use the slash commands:
 
 ```
-/local-review          # review local changes
+/local-review          # review local changes (full codebase access)
 /local-review 42       # review PR #42
+/local-review-fix      # review-fix loop (auto-accept, no confirmation)
+/local-review-fix 42   # checkout and fix a PR
 ```
 
-This reviews in-session with full codebase access. Unlike the CLI path (which only sees the diff), Claude Code can read source files to verify findings before reporting them. Same criteria, better context.
+The in-session commands are better than the CLI path: Claude Code can read source files to verify findings and make surgical edits.
 
 ## Backend selection
 
