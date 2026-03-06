@@ -12,14 +12,27 @@ From your target repo:
 path/to/local-review/install
 ```
 
-This copies the hook and review script into your repo, sets up default review criteria, and configures `git core.hooksPath`. Won't overwrite existing files (use `--force` to replace).
+This copies the hook and review script into your repo, sets up default review criteria, and wires up the pre-push hook. Won't overwrite existing files (use `--force` to replace).
 
-Files installed:
+### Hook manager integration
+
+The installer detects existing hook managers and integrates with them:
+
+| Manager | What happens |
+|---------|--------------|
+| **husky** (`.husky/` exists) | Creates `.husky/pre-push` (or appends to it) calling `extras/review-hook` |
+| **overcommit** (`.overcommit.yml` exists) | Adds a `PrePush: ReviewHook` section to `.overcommit.yml` |
+| **None** | Uses `.githooks/` directory + `git config core.hooksPath .githooks` |
+
+The full hook logic always lives in `.githooks/pre-push`. For husky/overcommit repos, a thin wrapper (`extras/review-hook`) calls through to it so both managers can coexist.
+
+### Files installed
 
 | File | Purpose |
 |------|---------|
-| `.githooks/pre-push` | Pre-push hook that triggers review |
+| `.githooks/pre-push` | Pre-push hook with full review logic |
 | `extras/review` | Standalone review script |
+| `extras/review-hook` | Thin wrapper for hook managers (husky/overcommit only) |
 | `.claude/review-criteria.md` | Review criteria (for Claude CLI + Claude Code) |
 | `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |

@@ -3,6 +3,9 @@ set -euo pipefail
 
 # Install local-review into a git repository.
 # Run from the target repo: path/to/local-review/install [--force]
+#
+# Detects existing hook managers (husky, overcommit) and integrates
+# with them instead of overriding core.hooksPath.
 
 FORCE=false
 for arg in "$@"; do
@@ -47,19 +50,136 @@ install_file() {
   installed+=("$dest")
 }
 
-# 1. Pre-push hook
-install_file "$SOURCE_DIR/hooks/pre-push" ".githooks/pre-push" 755
+# --- Detect hook manager ---
+HOOK_MANAGER="none"
+if [[ -d "$ROOT/.husky" ]]; then
+  HOOK_MANAGER="husky"
+elif [[ -f "$ROOT/.overcommit.yml" ]]; then
+  HOOK_MANAGER="overcommit"
+fi
 
-# 2. Review script
+# --- Install pre-push hook based on hook manager ---
+install_hook_husky() {
+  local hook_file="$ROOT/.husky/pre-push"
+  # shellcheck disable=SC2016
+  local hook_line='ROOT="$(git rev-parse --show-toplevel)" && "$ROOT/extras/review-hook"'
+
+  if [[ -f "$hook_file" ]]; then
+    if grep -qF "extras/review-hook" "$hook_file"; then
+      skipped+=(".husky/pre-push (already contains review hook)")
+      return
+    fi
+    if [[ "$FORCE" != true ]]; then
+      # Append to existing hook
+      printf '\n%s\n' "$hook_line" >> "$hook_file"
+      installed+=(".husky/pre-push (appended review hook)")
+      return
+    fi
+  fi
+
+  # Check if husky v8 (uses _/husky.sh sourcing) or v9+ (plain scripts)
+  if [[ -d "$ROOT/.husky/_" ]]; then
+    # husky v8
+    cat > "$hook_file" <<'HOOK'
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+ROOT="$(git rev-parse --show-toplevel)" && "$ROOT/extras/review-hook"
+HOOK
+  else
+    # husky v9+
+    cat > "$hook_file" <<'HOOK'
+ROOT="$(git rev-parse --show-toplevel)" && "$ROOT/extras/review-hook"
+HOOK
+  fi
+  chmod 755 "$hook_file"
+  installed+=(".husky/pre-push")
+}
+
+install_hook_overcommit() {
+  local config="$ROOT/.overcommit.yml"
+
+  if grep -q "review-hook" "$config" 2>/dev/null; then
+    skipped+=(".overcommit.yml (already contains review hook)")
+    return
+  fi
+
+  # Append PrePush section
+  cat >> "$config" <<'YAML'
+
+PrePush:
+  ReviewHook:
+    enabled: true
+    command: ['extras/review-hook']
+    quiet: false
+YAML
+  installed+=(".overcommit.yml (added PrePush ReviewHook)")
+}
+
+install_hook_githooks() {
+  install_file "$SOURCE_DIR/hooks/pre-push" ".githooks/pre-push" 755
+
+  # Set core.hooksPath only when no other manager owns it
+  local current_hooks
+  current_hooks=$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || echo "")
+  if [[ "$current_hooks" != ".githooks" ]]; then
+    git -C "$ROOT" config core.hooksPath .githooks
+    installed+=("git config core.hooksPath .githooks")
+  else
+    skipped+=("git config core.hooksPath (already set)")
+  fi
+}
+
+# The full pre-push hook lives in .githooks/pre-push and works standalone.
+# For husky/overcommit, we install a thin wrapper (extras/review-hook) that
+# the hook manager calls, keeping the full hook available for repos that
+# use .githooks directly.
+install_review_hook_wrapper() {
+  local wrapper="$ROOT/extras/review-hook"
+  if [[ -f "$wrapper" ]] && [[ "$FORCE" != true ]]; then
+    skipped+=("extras/review-hook (already exists)")
+    return
+  fi
+  mkdir -p "$ROOT/extras"
+  cat > "$wrapper" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+# Thin wrapper so hook managers (husky, overcommit) can call the review.
+# The full pre-push logic lives here to avoid duplicating it.
+
+ROOT="$(git rev-parse --show-toplevel)"
+exec "$ROOT/.githooks/pre-push" "$@"
+WRAPPER
+  chmod 755 "$wrapper"
+  installed+=("extras/review-hook")
+}
+
+case "$HOOK_MANAGER" in
+  husky)
+    # Install the full hook + wrapper, then wire into husky
+    install_file "$SOURCE_DIR/hooks/pre-push" ".githooks/pre-push" 755
+    install_review_hook_wrapper
+    install_hook_husky
+    ;;
+  overcommit)
+    # Install the full hook + wrapper, then wire into overcommit
+    install_file "$SOURCE_DIR/hooks/pre-push" ".githooks/pre-push" 755
+    install_review_hook_wrapper
+    install_hook_overcommit
+    ;;
+  *)
+    install_hook_githooks
+    ;;
+esac
+
+# --- Review script ---
 install_file "$SOURCE_DIR/review" "extras/review" 755
 
-# 3. Review criteria for Claude
+# --- Review criteria ---
 install_file "$SOURCE_DIR/criteria.md" ".claude/review-criteria.md"
-
-# 4. Review criteria for Copilot (GitHub PR reviewer)
 install_file "$SOURCE_DIR/criteria.md" ".github/copilot-instructions.md"
 
-# 5. Default review model
+# --- Default review model ---
 if [[ ! -f "$ROOT/.claude/review-model" ]] || [[ "$FORCE" == true ]]; then
   mkdir -p "$ROOT/.claude"
   echo "claude-sonnet-4-6" > "$ROOT/.claude/review-model"
@@ -68,17 +188,11 @@ else
   skipped+=(".claude/review-model (already exists)")
 fi
 
-# 6. Configure git hooks path
-CURRENT_HOOKS=$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || echo "")
-if [[ "$CURRENT_HOOKS" != ".githooks" ]]; then
-  git -C "$ROOT" config core.hooksPath .githooks
-  installed+=("git config core.hooksPath .githooks")
-else
-  skipped+=("git config core.hooksPath (already set)")
-fi
-
 # --- Summary ---
 echo "local-review installed in $ROOT"
+if [[ "$HOOK_MANAGER" != "none" ]]; then
+  echo "Detected hook manager: $HOOK_MANAGER"
+fi
 echo ""
 if [[ ${#installed[@]} -gt 0 ]]; then
   echo "Installed:"
