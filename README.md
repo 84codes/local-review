@@ -123,5 +123,5 @@ Pipes diff + criteria into `copilot` CLI. Falls back to `gh copilot` if the stan
 |---------|-----------------|
 | Review backend | `REVIEWER=claude` in `.review-config` or env var |
 | Base branch | `REVIEW_BASE_BRANCH=develop` env var (default: `main`) |
-| Review criteria | Edit `.claude/review-criteria.md` |
+| Review criteria | Edit `.claude/review-criteria.md` (built-in defaults used when absent) |
 | Claude model | Edit `.claude/review-model` |
