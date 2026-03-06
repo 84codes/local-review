@@ -4,47 +4,64 @@ AI-powered local code review for git repos. Supports both Claude CLI and Copilot
 
 Catches bugs, security issues, and logic errors before code hits a PR. Runs as a pre-push hook or standalone script.
 
-## Install
-
-From your target repo:
+## Developer setup (one-time)
 
 ```sh
-path/to/local-review/install
+git clone git@github.com:84codes/local-review.git ~/.local/share/local-review
+~/.local/share/local-review/local-review setup
 ```
 
-This copies the hook and review script into your repo, sets up default review criteria, and wires up the pre-push hook. Won't overwrite existing files (use `--force` to replace).
+This symlinks `local-review` into `~/.local/bin`. Make sure `~/.local/bin` is on your PATH.
 
-### Hook manager integration
+To update, `git pull` in `~/.local/share/local-review`.
 
-The installer detects existing hook managers and integrates with them:
+## Repo setup
 
-| Manager | What happens |
-|---------|--------------|
-| **husky** (`.husky/` exists) | Creates `.husky/pre-push` (or appends to it) calling `extras/review-hook` |
-| **overcommit** (`.overcommit.yml` exists) | Adds a `PrePush: ReviewHook` section to `.overcommit.yml` |
-| **None** | Uses `.githooks/` directory + `git config core.hooksPath .githooks` |
+From the target repo:
 
-The full hook logic always lives in `.githooks/pre-push`. For husky/overcommit repos, a thin wrapper (`extras/review-hook`) calls through to it so both managers can coexist.
+```sh
+local-review install
+```
 
-### Files installed
+This creates thin wrappers (2-line scripts that call `local-review`) and default config files. Won't overwrite existing files (use `--force` to replace).
+
+### What gets created
 
 | File | Purpose |
 |------|---------|
-| `.githooks/pre-push` | Pre-push hook with full review logic |
-| `extras/review` | Standalone review script |
-| `extras/review-hook` | Thin wrapper for hook managers (husky/overcommit only) |
+| `.githooks/pre-push` | Wrapper: `exec local-review hook` |
+| `extras/review` | Wrapper: `exec local-review review` |
 | `.claude/review-criteria.md` | Review criteria (for Claude CLI + Claude Code) |
 | `.github/copilot-instructions.md` | Review criteria (for @copilot PR reviewer) |
 | `.claude/review-model` | Claude model ID (default: `claude-sonnet-4-6`) |
+
+The wrappers are tiny and don't drift. All logic lives in the `local-review` command.
+
+### Hook manager integration
+
+The installer detects existing hook managers:
+
+| Manager | What happens |
+|---------|--------------|
+| **husky** (`.husky/` exists) | Creates/appends `.husky/pre-push` calling `local-review hook` |
+| **overcommit** (`.overcommit.yml` exists) | Adds `PrePush: LocalReview` to `.overcommit.yml` |
+| **None** | Creates `.githooks/pre-push` + sets `git config core.hooksPath .githooks` |
 
 ## Usage
 
 ### Standalone review
 
 ```sh
-extras/review              # review local changes vs origin/main
-extras/review 42           # review PR #42
-extras/review --raw        # raw markdown output (no pager)
+local-review review              # review local changes vs origin/main
+local-review review 42           # review PR #42
+local-review review --raw        # raw markdown output (no pager)
+```
+
+Or via the repo wrapper:
+
+```sh
+extras/review
+extras/review 42
 ```
 
 ### Pre-push hook
@@ -53,42 +70,31 @@ Triggers automatically on `git push`. Asks before running. If issues are found, 
 
 1. Push anyway
 2. Abort
-3. Address interactively with Claude (claude backend only)
+3. Address interactively (pipes findings into claude/copilot for follow-up)
 
 Inside a Claude Code session, the hook emits the diff to stderr so Claude Code picks it up for interactive review.
 
 ## Backend selection
 
-The review script supports `claude` and `copilot` as backends. Selection order:
+Supports `claude` and `copilot` as backends. Selection order:
 
-1. **Environment variable**: `REVIEWER=copilot extras/review`
+1. **Environment variable**: `REVIEWER=copilot local-review review`
 2. **Config file**: Create `.review-config` in repo root with `REVIEWER=claude`
 3. **Auto-detect**: Uses whichever CLI is installed. Prefers `claude` if both are present.
 
 ### Claude backend
 
-Pipes diff + criteria into `claude -p`. Requires the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code).
-
-Model is read from `.claude/review-model` (one model ID per line, e.g. `claude-sonnet-4-6`).
+Pipes diff + criteria into `claude -p`. Model is read from `.claude/review-model`.
 
 ### Copilot backend
 
-Pipes diff + criteria into `copilot` CLI (standalone binary). Falls back to `gh copilot` if `copilot` isn't installed.
+Pipes diff + criteria into `copilot` CLI. Falls back to `gh copilot` if the standalone binary isn't installed.
 
 ## Configuration
 
-### Base branch
-
-Default base branch is `main`. Override with `REVIEW_BASE_BRANCH`:
-
-```sh
-REVIEW_BASE_BRANCH=develop extras/review
-```
-
-### Review criteria
-
-Edit `.claude/review-criteria.md` (or `.github/copilot-instructions.md`) to customize what the reviewer checks for. Both files start with the same default content. The `.github/copilot-instructions.md` file also feeds into @copilot's PR reviews on GitHub.
-
-### Review model
-
-Edit `.claude/review-model` to change the Claude model used for reviews (claude backend only).
+| Setting | How to configure |
+|---------|-----------------|
+| Review backend | `REVIEWER=claude` in `.review-config` or env var |
+| Base branch | `REVIEW_BASE_BRANCH=develop` env var (default: `main`) |
+| Review criteria | Edit `.claude/review-criteria.md` |
+| Claude model | Edit `.claude/review-model` |

@@ -1,0 +1,487 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# local-review: AI-powered local code review for git repos.
+# Subcommands: setup, install, review, hook
+
+PROG="local-review"
+VERSION="0.1.0"
+
+# --- Shared helpers ---
+
+find_repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || {
+    echo "Not inside a git repository." >&2
+    exit 1
+  }
+}
+
+resolve_backend() {
+  local root="$1"
+  # 1. Environment variable
+  if [[ -n "${REVIEWER:-}" ]]; then
+    echo "$REVIEWER"
+    return
+  fi
+  # 2. Config file in repo root
+  if [[ -f "$root/.review-config" ]]; then
+    local val
+    val=$(grep -E '^REVIEWER=' "$root/.review-config" | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+    if [[ -n "$val" ]]; then
+      echo "$val"
+      return
+    fi
+  fi
+  # 3. Auto-detect: prefer claude, fall back to copilot
+  if command -v claude &>/dev/null; then
+    echo "claude"
+  elif command -v copilot &>/dev/null || command -v gh &>/dev/null; then
+    echo "copilot"
+  else
+    echo ""
+  fi
+}
+
+load_criteria() {
+  local root="$1"
+  if [[ -f "$root/.claude/review-criteria.md" ]]; then
+    cat "$root/.claude/review-criteria.md"
+  elif [[ -f "$root/.github/review-criteria.md" ]]; then
+    cat "$root/.github/review-criteria.md"
+  fi
+}
+
+run_backend() {
+  local backend="$1" prompt="$2" diff_file="$3" root="$4"
+
+  case "$backend" in
+    claude)
+      local model_flag=""
+      local model_file="$root/.claude/review-model"
+      if [[ -f "$model_file" ]]; then
+        local model
+        model=$(tr -d '[:space:]' < "$model_file")
+        model_flag="--model $model"
+      fi
+      unset CLAUDECODE
+      # shellcheck disable=SC2086
+      { printf '%s\n\n```diff\n' "$prompt"; cat "$diff_file"; printf '```'; } \
+        | claude -p --no-session-persistence --effort medium $model_flag
+      ;;
+    copilot)
+      local copilot_cmd="copilot"
+      if ! command -v copilot &>/dev/null; then
+        if command -v gh &>/dev/null; then
+          copilot_cmd="gh copilot"
+        else
+          echo "Neither copilot nor gh CLI found." >&2
+          return 1
+        fi
+      fi
+      { printf '%s\n\n```diff\n' "$prompt"; cat "$diff_file"; printf '```'; } \
+        | $copilot_cmd
+      ;;
+    *)
+      echo "Unknown backend: $backend (use 'claude' or 'copilot')" >&2
+      return 1
+      ;;
+  esac
+}
+
+pipe_to_backend_interactive() {
+  local backend="$1"
+  shift
+  case "$backend" in
+    claude)
+      "$@" | claude
+      ;;
+    copilot)
+      local copilot_cmd="copilot"
+      command -v copilot &>/dev/null || copilot_cmd="gh copilot"
+      "$@" | $copilot_cmd
+      ;;
+  esac
+}
+
+# --- Subcommand: setup ---
+
+cmd_setup() {
+  local install_dir="${XDG_DATA_HOME:-$HOME/.local/share}/local-review"
+  local bin_dir="$HOME/.local/bin"
+
+  # Resolve where this script lives (the repo checkout)
+  local source_dir
+  source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+  if [[ "$source_dir" == "$install_dir" ]]; then
+    echo "Already installed at $install_dir"
+  else
+    mkdir -p "$install_dir"
+    cp "$source_dir/local-review" "$install_dir/local-review"
+    chmod 755 "$install_dir/local-review"
+    cp "$source_dir/criteria.md" "$install_dir/criteria.md"
+    echo "Installed to $install_dir"
+  fi
+
+  mkdir -p "$bin_dir"
+  ln -sf "$install_dir/local-review" "$bin_dir/local-review"
+  echo "Symlinked $bin_dir/local-review"
+
+  if ! echo "$PATH" | tr ':' '\n' | grep -qx "$bin_dir"; then
+    echo ""
+    echo "Add to your shell profile:"
+    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  fi
+}
+
+# --- Subcommand: install ---
+
+cmd_install() {
+  local force=false
+  for arg in "$@"; do
+    case "$arg" in
+      --force) force=true ;;
+      -h|--help)
+        echo "Usage: $PROG install [--force]"
+        echo "  Sets up thin wrappers and config in the current git repo."
+        exit 0
+        ;;
+    esac
+  done
+
+  local root
+  root=$(find_repo_root)
+
+  # Resolve where criteria.md lives (next to this script)
+  local source_dir
+  source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+  local installed=()
+  local skipped=()
+
+  # --- Thin wrapper: .githooks/pre-push ---
+  install_wrapper() {
+    local dest="$root/$1" content="$2"
+    if [[ -f "$dest" ]] && [[ "$force" != true ]]; then
+      skipped+=("$1 (already exists)")
+      return
+    fi
+    mkdir -p "$(dirname "$dest")"
+    printf '%s\n' "$content" > "$dest"
+    chmod 755 "$dest"
+    installed+=("$1")
+  }
+
+  # --- Detect hook manager ---
+  local hook_manager="none"
+  if [[ -d "$root/.husky" ]]; then
+    hook_manager="husky"
+  elif [[ -f "$root/.overcommit.yml" ]]; then
+    hook_manager="overcommit"
+  fi
+
+  local hook_wrapper
+  hook_wrapper=$(cat <<'SH'
+#!/usr/bin/env bash
+exec local-review hook "$@"
+SH
+)
+
+  local review_wrapper
+  review_wrapper=$(cat <<'SH'
+#!/usr/bin/env bash
+exec local-review review "$@"
+SH
+)
+
+  case "$hook_manager" in
+    husky)
+      local husky_file="$root/.husky/pre-push"
+      local husky_line="local-review hook"
+      if [[ -f "$husky_file" ]] && grep -qF "$husky_line" "$husky_file"; then
+        skipped+=(".husky/pre-push (already contains local-review)")
+      elif [[ -f "$husky_file" ]] && [[ "$force" != true ]]; then
+        printf '\n%s\n' "$husky_line" >> "$husky_file"
+        installed+=(".husky/pre-push (appended local-review hook)")
+      else
+        if [[ -d "$root/.husky/_" ]]; then
+          # husky v8
+          # shellcheck disable=SC2016
+          printf '#!/bin/sh\n. "$(dirname "$0")/_/husky.sh"\n\n%s\n' "$husky_line" > "$husky_file"
+        else
+          # husky v9+
+          printf '%s\n' "$husky_line" > "$husky_file"
+        fi
+        chmod 755 "$husky_file"
+        installed+=(".husky/pre-push")
+      fi
+      ;;
+    overcommit)
+      local oc_config="$root/.overcommit.yml"
+      if grep -q "local-review" "$oc_config" 2>/dev/null; then
+        skipped+=(".overcommit.yml (already contains local-review)")
+      else
+        cat >> "$oc_config" <<'YAML'
+
+PrePush:
+  LocalReview:
+    enabled: true
+    command: ['local-review', 'hook']
+    quiet: false
+YAML
+        installed+=(".overcommit.yml (added PrePush LocalReview)")
+      fi
+      ;;
+    *)
+      install_wrapper ".githooks/pre-push" "$hook_wrapper"
+      local current_hooks
+      current_hooks=$(git -C "$root" config --get core.hooksPath 2>/dev/null || echo "")
+      if [[ "$current_hooks" != ".githooks" ]]; then
+        git -C "$root" config core.hooksPath .githooks
+        installed+=("git config core.hooksPath .githooks")
+      else
+        skipped+=("git config core.hooksPath (already set)")
+      fi
+      ;;
+  esac
+
+  # --- Thin wrapper: extras/review ---
+  install_wrapper "extras/review" "$review_wrapper"
+
+  # --- Config files (repo-specific, won't overwrite) ---
+  install_config() {
+    local src="$1" dest="$2"
+    local dest_path="$root/$dest"
+    if [[ -f "$dest_path" ]] && [[ "$force" != true ]]; then
+      skipped+=("$dest (already exists)")
+      return
+    fi
+    mkdir -p "$(dirname "$dest_path")"
+    cp "$src" "$dest_path"
+    installed+=("$dest")
+  }
+
+  install_config "$source_dir/criteria.md" ".claude/review-criteria.md"
+  install_config "$source_dir/criteria.md" ".github/copilot-instructions.md"
+
+  if [[ ! -f "$root/.claude/review-model" ]] || [[ "$force" == true ]]; then
+    mkdir -p "$root/.claude"
+    echo "claude-sonnet-4-6" > "$root/.claude/review-model"
+    installed+=(".claude/review-model")
+  else
+    skipped+=(".claude/review-model (already exists)")
+  fi
+
+  # --- Summary ---
+  echo "$PROG installed in $root"
+  if [[ "$hook_manager" != "none" ]]; then
+    echo "Detected hook manager: $hook_manager"
+  fi
+  echo ""
+  if [[ ${#installed[@]} -gt 0 ]]; then
+    echo "Installed:"
+    for item in "${installed[@]}"; do
+      echo "  + $item"
+    done
+  fi
+  if [[ ${#skipped[@]} -gt 0 ]]; then
+    echo "Skipped:"
+    for item in "${skipped[@]}"; do
+      echo "  - $item"
+    done
+  fi
+  echo ""
+  echo "Configure backend in .review-config: REVIEWER=claude or REVIEWER=copilot"
+  echo "Or set REVIEWER env var. Default: auto-detect."
+}
+
+# --- Subcommand: review ---
+
+cmd_review() {
+  local raw=false
+  local pr_number=""
+  for arg in "$@"; do
+    case "$arg" in
+      --raw) raw=true ;;
+      -h|--help)
+        echo "Usage: $PROG review [--raw] [PR_NUMBER]"
+        exit 0
+        ;;
+      *) pr_number="$arg" ;;
+    esac
+  done
+
+  local root
+  root=$(find_repo_root)
+
+  local backend
+  backend=$(resolve_backend "$root")
+  if [[ -z "$backend" ]]; then
+    echo "No review backend found. Install claude CLI or copilot CLI." >&2
+    exit 1
+  fi
+
+  local diff_file
+  diff_file=$(mktemp)
+  trap 'rm -f "$diff_file"' EXIT
+
+  local main_branch="${REVIEW_BASE_BRANCH:-main}"
+
+  if [[ -n "$pr_number" ]]; then
+    if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+      echo "Invalid PR number: $pr_number" >&2
+      exit 1
+    fi
+    command gh pr diff "$pr_number" > "$diff_file" || {
+      echo "Failed to fetch diff for PR #$pr_number" >&2
+      exit 1
+    }
+  else
+    local base
+    base=$(git merge-base HEAD "origin/$main_branch")
+    git diff "$base"...HEAD -- > "$diff_file"
+  fi
+
+  if [[ ! -s "$diff_file" ]]; then
+    echo "No changes to review."
+    exit 0
+  fi
+
+  local criteria
+  criteria=$(load_criteria "$root")
+  local prompt="Review the following diff and report ONLY problems that need fixing.
+
+$criteria"
+
+  local output
+  output=$(run_backend "$backend" "$prompt" "$diff_file" "$root") || {
+    echo "Review failed ($backend exited $?)" >&2
+    exit 1
+  }
+
+  if [[ "$raw" == true ]]; then
+    echo "$output"
+  elif [[ -t 1 ]] && command -v glow &>/dev/null; then
+    echo "$output" | glow --pager -
+  else
+    echo "$output"
+    if [[ -t 1 ]]; then
+      echo "(tip: install glow for rendered markdown output)" >&2
+    fi
+  fi
+}
+
+# --- Subcommand: hook (pre-push) ---
+
+cmd_hook() {
+  local main_branch="${REVIEW_BASE_BRANCH:-main}"
+
+  local base
+  base=$(git merge-base HEAD "origin/$main_branch" 2>/dev/null || echo "")
+  if [[ -z "$base" ]]; then
+    exit 0
+  fi
+
+  local diff_file
+  diff_file=$(mktemp)
+  local review_file=""
+  trap 'rm -f "$diff_file" "$review_file"' EXIT
+  git diff "$base"...HEAD -- > "$diff_file"
+  if [[ ! -s "$diff_file" ]]; then
+    exit 0
+  fi
+
+  local root
+  root=$(find_repo_root)
+
+  local backend
+  backend=$(resolve_backend "$root")
+  if [[ -z "$backend" ]]; then
+    echo "No review backend found, skipping review"
+    exit 0
+  fi
+
+  local criteria
+  criteria=$(load_criteria "$root")
+
+  # Inside a Claude Code session: emit to stderr for interactive review
+  if [[ -n "${CLAUDECODE:-}" ]]; then
+    {
+      printf '%s\n\n%s\n\n```diff\n' \
+        "Review the following diff and report ONLY problems that need fixing." \
+        "$criteria"
+      cat "$diff_file"
+      printf '```\n\n---\nINSTRUCTION: The push was intentionally blocked by the review hook.\nReview the diff above against the criteria. Present each finding to the user one by one.\nAsk for approval before making any changes. Do not fix anything without explicit user confirmation.\nIf there are no issues, tell the user and push with --no-verify to bypass the hook.\n'
+    } >&2
+    exit 1
+  fi
+
+  # Ask interactive terminal users if they want to run the review
+  if [[ -e /dev/tty ]]; then
+    local answer
+    read -r -p "Run AI review before pushing? [Y/n] " answer </dev/tty 2>/dev/tty || answer="y"
+    if [[ "$answer" =~ ^[Nn]$ ]]; then
+      exit 0
+    fi
+  fi
+
+  # Run review
+  echo "Running $backend review before push..."
+  review_file=$(mktemp)
+  REVIEWER="$backend" "$PROG" review --raw > "$review_file"
+  if command -v glow &>/dev/null; then
+    glow --pager - < "$review_file"
+  else
+    cat "$review_file"
+    if [[ -t 1 ]]; then
+      echo "(tip: install glow for rendered markdown output)" >&2
+    fi
+  fi
+
+  # Let the user decide
+  if ! grep -qF "No issues found" "$review_file"; then
+    echo ""
+    echo "Issues found. What do you want to do?"
+    echo "  1) Push anyway"
+    echo "  2) Abort"
+    echo "  3) Address interactively"
+    local choice
+    read -r -p "Choice [1-3]: " choice </dev/tty 2>/dev/tty || choice="2"
+    case "$choice" in
+      1) exit 0 ;;
+      3)
+        pipe_to_backend_interactive "$backend" \
+          printf '%s\n\n%s' "Here are the review findings. Ask me what to address." "$(cat "$review_file")"
+        echo "When ready, run: git push --no-verify" >&2
+        exit 1
+        ;;
+      *) exit 1 ;;
+    esac
+  fi
+}
+
+# --- Main dispatch ---
+
+case "${1:-}" in
+  setup)   shift; cmd_setup "$@" ;;
+  install) shift; cmd_install "$@" ;;
+  review)  shift; cmd_review "$@" ;;
+  hook)    shift; cmd_hook "$@" ;;
+  -h|--help|"")
+    echo "Usage: $PROG <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  setup    Install local-review for your user (~/.local/bin)"
+    echo "  install  Set up thin wrappers and config in current git repo"
+    echo "  review   Run a code review on current changes"
+    echo "  hook     Pre-push hook logic (called by git)"
+    echo ""
+    echo "Version: $VERSION"
+    ;;
+  --version) echo "$PROG $VERSION" ;;
+  *)
+    echo "$PROG: unknown command '$1'" >&2
+    echo "Run '$PROG --help' for usage." >&2
+    exit 1
+    ;;
+esac
