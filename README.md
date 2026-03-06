@@ -81,9 +81,9 @@ Inside a Claude Code session, the hook emits the diff to stderr so Claude Code p
 Automatically review, fix, and re-review until clean:
 
 ```sh
-local-review fix               # review-fix loop (max 5 iterations)
-local-review fix --max=3       # limit iterations
-local-review fix 42            # checkout and fix a PR
+local-review review --fix              # review-fix loop (max 5 iterations)
+local-review review --fix --max=3      # limit iterations
+local-review review --fix 42           # checkout and fix a PR
 ```
 
 Each iteration: review the diff, fix findings, re-review. Stops when "No issues found" or max iterations reached. Requires the claude backend.

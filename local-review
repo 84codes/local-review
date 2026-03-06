@@ -308,12 +308,18 @@ YAML
 
 cmd_review() {
   local raw=false
+  local fix=false
+  local max_iterations=5
   local pr_number=""
   for arg in "$@"; do
     case "$arg" in
       --raw) raw=true ;;
+      --fix) fix=true ;;
+      --max=*) max_iterations="${arg#--max=}" ;;
       -h|--help)
-        echo "Usage: $PROG review [--raw] [PR_NUMBER]"
+        echo "Usage: $PROG review [--raw] [--fix [--max=N]] [PR_NUMBER]"
+        echo "  --fix   Review, fix, and re-review in a loop until clean"
+        echo "  --max=N Max iterations for --fix (default: 5)"
         exit 0
         ;;
       *) pr_number="$arg" ;;
@@ -330,54 +336,114 @@ cmd_review() {
     exit 1
   fi
 
-  local diff_file
-  diff_file=$(mktemp)
-  trap 'rm -f "$diff_file"' EXIT
+  if [[ "$fix" == true ]] && [[ "$backend" != "claude" ]]; then
+    echo "The --fix flag requires the claude backend." >&2
+    exit 1
+  fi
 
   local main_branch="${REVIEW_BASE_BRANCH:-main}"
 
-  if [[ -n "$pr_number" ]]; then
-    if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
-      echo "Invalid PR number: $pr_number" >&2
-      exit 1
-    fi
-    command gh pr diff "$pr_number" > "$diff_file" || {
-      echo "Failed to fetch diff for PR #$pr_number" >&2
+  # For --fix with a PR number, checkout the branch first
+  if [[ "$fix" == true ]] && [[ -n "$pr_number" ]]; then
+    echo "Checking out PR #$pr_number..."
+    command gh pr checkout "$pr_number" || {
+      echo "Failed to checkout PR #$pr_number" >&2
       exit 1
     }
-  else
-    local base
-    base=$(git merge-base HEAD "origin/$main_branch")
-    git diff "$base"...HEAD -- > "$diff_file"
-  fi
-
-  if [[ ! -s "$diff_file" ]]; then
-    echo "No changes to review."
-    exit 0
+    # After checkout, review local diff instead of PR diff
+    pr_number=""
   fi
 
   local criteria
   criteria=$(load_criteria "$root")
-  local prompt="Review the following diff and report ONLY problems that need fixing.
+  local review_prompt="Review the following diff and report ONLY problems that need fixing.
 
 $criteria"
 
-  local output
-  output=$(run_backend "$backend" "$prompt" "$diff_file" "$root") || {
-    echo "Review failed ($backend exited $?)" >&2
-    exit 1
-  }
+  local iteration=0
+  while true; do
+    iteration=$((iteration + 1))
 
-  if [[ "$raw" == true ]]; then
-    echo "$output"
-  elif [[ -t 1 ]] && command -v glow &>/dev/null; then
-    echo "$output" | glow --pager -
-  else
-    echo "$output"
-    if [[ -t 1 ]]; then
-      echo "(tip: install glow for rendered markdown output)" >&2
+    if [[ "$fix" == true ]]; then
+      echo "--- Review iteration $iteration/$max_iterations ---"
     fi
-  fi
+
+    # Get diff
+    local diff_file
+    diff_file=$(mktemp)
+
+    if [[ -n "$pr_number" ]]; then
+      if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+        echo "Invalid PR number: $pr_number" >&2
+        rm -f "$diff_file"
+        exit 1
+      fi
+      command gh pr diff "$pr_number" > "$diff_file" || {
+        echo "Failed to fetch diff for PR #$pr_number" >&2
+        rm -f "$diff_file"
+        exit 1
+      }
+    else
+      local base
+      base=$(git merge-base HEAD "origin/$main_branch")
+      git diff "$base"...HEAD -- > "$diff_file"
+    fi
+
+    if [[ ! -s "$diff_file" ]]; then
+      echo "No changes to review."
+      rm -f "$diff_file"
+      break
+    fi
+
+    # Run review
+    local output
+    output=$(run_backend "$backend" "$review_prompt" "$diff_file" "$root") || {
+      echo "Review failed ($backend exited $?)" >&2
+      rm -f "$diff_file"
+      exit 1
+    }
+    rm -f "$diff_file"
+
+    # Display output
+    if [[ "$raw" == true ]]; then
+      echo "$output"
+    elif [[ -t 1 ]] && command -v glow &>/dev/null; then
+      echo "$output" | glow --pager -
+    else
+      echo "$output"
+      if [[ -t 1 ]]; then
+        echo "(tip: install glow for rendered markdown output)" >&2
+      fi
+    fi
+
+    # Without --fix, single pass and done
+    if [[ "$fix" != true ]]; then
+      break
+    fi
+
+    # Check if clean
+    if echo "$output" | grep -qF "No issues found"; then
+      echo "Clean after $iteration iteration(s)."
+      break
+    fi
+
+    if (( iteration >= max_iterations )); then
+      echo "Reached max iterations ($max_iterations). Issues may remain."
+      break
+    fi
+
+    # Fix: pipe findings into claude
+    echo "Fixing issues..."
+    unset CLAUDECODE
+    printf '%s\n\n%s' \
+      "Fix the following review findings in the codebase. Edit the files directly. Do not explain, just fix. If a finding is a false positive, skip it." \
+      "$output" \
+      | claude --no-session-persistence || {
+      echo "Fix step failed." >&2
+      exit 1
+    }
+    echo ""
+  done
 }
 
 # --- Subcommand: hook (pre-push) ---
@@ -469,114 +535,12 @@ cmd_hook() {
   fi
 }
 
-# --- Subcommand: fix (review-fix loop) ---
-
-cmd_fix() {
-  local max_iterations=5
-  local pr_number=""
-  for arg in "$@"; do
-    case "$arg" in
-      --max=*) max_iterations="${arg#--max=}" ;;
-      -h|--help)
-        echo "Usage: $PROG fix [--max=N] [PR_NUMBER]"
-        echo "  Review and fix in a loop until clean (default max: 5 iterations)."
-        exit 0
-        ;;
-      *) pr_number="$arg" ;;
-    esac
-  done
-
-  local root
-  root=$(find_repo_root)
-
-  local backend
-  backend=$(resolve_backend "$root")
-  if [[ -z "$backend" ]]; then
-    echo "No review backend found. Install claude CLI or copilot CLI." >&2
-    exit 1
-  fi
-
-  if [[ "$backend" != "claude" ]]; then
-    echo "The fix subcommand requires the claude backend." >&2
-    exit 1
-  fi
-
-  if [[ -n "$pr_number" ]]; then
-    echo "Checking out PR #$pr_number..."
-    command gh pr checkout "$pr_number" || {
-      echo "Failed to checkout PR #$pr_number" >&2
-      exit 1
-    }
-  fi
-
-  local main_branch="${REVIEW_BASE_BRANCH:-main}"
-  local criteria
-  criteria=$(load_criteria "$root")
-  local review_prompt="Review the following diff and report ONLY problems that need fixing.
-
-$criteria"
-
-  local iteration=0
-  while (( iteration < max_iterations )); do
-    iteration=$((iteration + 1))
-    echo "--- Review iteration $iteration/$max_iterations ---"
-
-    # Get current diff
-    local diff_file
-    diff_file=$(mktemp)
-    local base
-    base=$(git merge-base HEAD "origin/$main_branch")
-    git diff "$base"...HEAD -- > "$diff_file"
-
-    if [[ ! -s "$diff_file" ]]; then
-      echo "No changes to review."
-      rm -f "$diff_file"
-      break
-    fi
-
-    # Run review
-    local review_output
-    review_output=$(run_backend "$backend" "$review_prompt" "$diff_file" "$root") || {
-      echo "Review failed ($backend exited $?)" >&2
-      rm -f "$diff_file"
-      exit 1
-    }
-    rm -f "$diff_file"
-
-    echo "$review_output"
-    echo ""
-
-    if echo "$review_output" | grep -qF "No issues found"; then
-      echo "Clean after $iteration iteration(s)."
-      break
-    fi
-
-    if (( iteration >= max_iterations )); then
-      echo "Reached max iterations ($max_iterations). Issues may remain."
-      break
-    fi
-
-    # Fix: pipe findings into claude with instructions to edit files
-    echo "Fixing issues..."
-    unset CLAUDECODE
-    printf '%s\n\n%s' \
-      "Fix the following review findings in the codebase. Edit the files directly. Do not explain, just fix. If a finding is a false positive, skip it." \
-      "$review_output" \
-      | claude --no-session-persistence || {
-      echo "Fix step failed." >&2
-      exit 1
-    }
-    echo ""
-  done
-}
-
 # --- Main dispatch ---
 
 case "${1:-}" in
   setup)   shift; cmd_setup "$@" ;;
   install) shift; cmd_install "$@" ;;
   review)  shift; cmd_review "$@" ;;
-  fix)     shift; cmd_fix "$@" ;;
   hook)    shift; cmd_hook "$@" ;;
   -h|--help|"")
     echo "Usage: $PROG <command> [options]"
@@ -584,8 +548,7 @@ case "${1:-}" in
     echo "Commands:"
     echo "  setup    Install local-review for your user (~/.local/bin)"
     echo "  install  Set up thin wrappers and config in current git repo"
-    echo "  review   Run a code review on current changes"
-    echo "  fix      Review and fix in a loop until clean"
+    echo "  review   Run a code review on current changes (--fix to auto-fix)"
     echo "  hook     Pre-push hook logic (called by git)"
     echo ""
     echo "Version: $VERSION"
