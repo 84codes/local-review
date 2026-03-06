@@ -48,6 +48,13 @@ load_criteria() {
     cat "$root/.claude/review-criteria.md"
   elif [[ -f "$root/.github/review-criteria.md" ]]; then
     cat "$root/.github/review-criteria.md"
+  else
+    # Fall back to the default criteria shipped with local-review
+    local source_dir
+    source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    if [[ -f "$source_dir/criteria.md" ]]; then
+      cat "$source_dir/criteria.md"
+    fi
   fi
 }
 
