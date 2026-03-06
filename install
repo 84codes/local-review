@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Install local-review into a git repository.
+# Run from the target repo: path/to/local-review/install [--force]
+
+FORCE=false
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=true ;;
+    -h|--help)
+      echo "Usage: path/to/local-review/install [--force]"
+      echo "  --force  Overwrite existing files"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Resolve the directory where this installer lives
+SOURCE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Must be run from inside a git repo
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "Not inside a git repository." >&2
+  exit 1
+}
+
+installed=()
+skipped=()
+
+install_file() {
+  local src="$1" dest="$2" mode="${3:-644}"
+  local dest_path="$ROOT/$dest"
+
+  if [[ -f "$dest_path" ]] && [[ "$FORCE" != true ]]; then
+    skipped+=("$dest (already exists)")
+    return
+  fi
+
+  mkdir -p "$(dirname "$dest_path")"
+  cp "$src" "$dest_path"
+  chmod "$mode" "$dest_path"
+  installed+=("$dest")
+}
+
+# 1. Pre-push hook
+install_file "$SOURCE_DIR/hooks/pre-push" ".githooks/pre-push" 755
+
+# 2. Review script
+install_file "$SOURCE_DIR/review" "extras/review" 755
+
+# 3. Review criteria for Claude
+install_file "$SOURCE_DIR/criteria.md" ".claude/review-criteria.md"
+
+# 4. Review criteria for Copilot (GitHub PR reviewer)
+install_file "$SOURCE_DIR/criteria.md" ".github/copilot-instructions.md"
+
+# 5. Default review model
+if [[ ! -f "$ROOT/.claude/review-model" ]] || [[ "$FORCE" == true ]]; then
+  mkdir -p "$ROOT/.claude"
+  echo "claude-sonnet-4-6" > "$ROOT/.claude/review-model"
+  installed+=(".claude/review-model")
+else
+  skipped+=(".claude/review-model (already exists)")
+fi
+
+# 6. Configure git hooks path
+CURRENT_HOOKS=$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null || echo "")
+if [[ "$CURRENT_HOOKS" != ".githooks" ]]; then
+  git -C "$ROOT" config core.hooksPath .githooks
+  installed+=("git config core.hooksPath .githooks")
+else
+  skipped+=("git config core.hooksPath (already set)")
+fi
+
+# --- Summary ---
+echo "local-review installed in $ROOT"
+echo ""
+if [[ ${#installed[@]} -gt 0 ]]; then
+  echo "Installed:"
+  for item in "${installed[@]}"; do
+    echo "  + $item"
+  done
+fi
+if [[ ${#skipped[@]} -gt 0 ]]; then
+  echo "Skipped:"
+  for item in "${skipped[@]}"; do
+    echo "  - $item"
+  done
+fi
+echo ""
+echo "Configure backend in .review-config: REVIEWER=claude or REVIEWER=copilot"
+echo "Or set REVIEWER env var. Default: auto-detect."
