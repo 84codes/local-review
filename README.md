@@ -50,13 +50,15 @@ The installer detects existing hook managers:
 
 ### Standalone review
 
+Running without a subcommand defaults to `review`:
+
 ```sh
-local-review review                              # review local changes vs origin/main
-local-review review 42                           # review PR #42
-local-review review --reviewer=codex             # force a specific backend
-local-review review --model=claude-opus-4-6      # override model
-local-review review --criteria=my-criteria.md    # use custom criteria file
-local-review review --raw                        # raw markdown output (no pager)
+local-review                              # review local changes vs origin/main
+local-review 42                           # review PR #42
+local-review --reviewer=codex             # force a specific backend
+local-review --model=claude-opus-4-6      # override model
+local-review --criteria=my-criteria.md    # use custom criteria file
+local-review --raw                        # raw markdown output (no pager)
 ```
 
 ### Pre-push hook
@@ -74,9 +76,9 @@ Inside a Claude Code session, the hook emits the diff to stderr so Claude Code p
 Automatically review, fix, and re-review until clean:
 
 ```sh
-local-review review --fix              # review-fix loop (max 5 iterations)
-local-review review --fix --max=3      # limit iterations
-local-review review --fix 42           # checkout and fix a PR
+local-review --fix              # review-fix loop (max 5 iterations)
+local-review --fix --max=3      # limit iterations
+local-review --fix 42           # checkout and fix a PR
 ```
 
 Each iteration: review the diff, fix findings, re-review. Stops when "No issues found" or max iterations reached. Requires an agentic backend (claude, codex, gemini, or opencode).
@@ -108,8 +110,8 @@ They coexist well:
 
 Supports `claude`, `codex`, `gemini`, `opencode`, and `copilot` as backends. Selection order:
 
-1. **CLI flag**: `local-review review --reviewer=codex`
-2. **Environment variable**: `REVIEWER=copilot local-review review`
+1. **CLI flag**: `local-review --reviewer=codex`
+2. **Environment variable**: `REVIEWER=copilot local-review`
 3. **Config file**: Create `.review-config` in repo root with `REVIEWER=claude`
 4. **Auto-detect**: Uses the first installed CLI found (claude > codex > gemini > opencode > copilot).
 

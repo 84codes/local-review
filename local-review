@@ -629,21 +629,24 @@ case "${1:-}" in
   install) shift; cmd_install "$@" ;;
   review)  shift; cmd_review "$@" ;;
   hook)    shift; cmd_hook "$@" ;;
-  -h|--help|"")
-    echo "Usage: $PROG <command> [options]"
+  -h|--help)
+    echo "Usage: $PROG [OPTIONS] [PR_NUMBER]"
+    echo "       $PROG <command> [options]"
+    echo ""
+    echo "Running without a command defaults to review."
     echo ""
     echo "Commands:"
     echo "  setup    Install local-review for your user (~/.local/bin)"
     echo "  install  Set up thin wrappers and config in current git repo"
-    echo "  review   Run a code review on current changes (--fix to auto-fix)"
+    echo "  review   Run a code review (default command)"
     echo "  hook     Pre-push hook logic (called by git)"
     echo ""
+    echo "Run '$PROG review --help' for review options."
     echo "Version: $VERSION"
     ;;
   --version) echo "$PROG $VERSION" ;;
   *)
-    echo "$PROG: unknown command '$1'" >&2
-    echo "Run '$PROG --help' for usage." >&2
-    exit 1
+    # Default to review for unrecognized args (flags, PR numbers, etc.)
+    cmd_review "$@"
     ;;
 esac
