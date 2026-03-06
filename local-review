@@ -247,6 +247,7 @@ cmd_install() {
   local hook_wrapper
   hook_wrapper=$(cat <<'SH'
 #!/usr/bin/env bash
+command -v local-review &>/dev/null || exit 0
 exec local-review hook "$@"
 SH
 )
@@ -254,20 +255,20 @@ SH
   case "$hook_manager" in
     husky)
       local husky_file="$root/.husky/pre-push"
-      local husky_line="local-review hook"
-      if [[ -f "$husky_file" ]] && grep -qF "$husky_line" "$husky_file"; then
+      local husky_guard="command -v local-review &>/dev/null && local-review hook"
+      if [[ -f "$husky_file" ]] && grep -qF "local-review hook" "$husky_file"; then
         skipped+=(".husky/pre-push (already contains local-review)")
       elif [[ -f "$husky_file" ]] && [[ "$force" != true ]]; then
-        printf '\n%s\n' "$husky_line" >> "$husky_file"
+        printf '\n%s\n' "$husky_guard" >> "$husky_file"
         installed+=(".husky/pre-push (appended local-review hook)")
       else
         if [[ -d "$root/.husky/_" ]]; then
           # husky v8
           # shellcheck disable=SC2016
-          printf '#!/bin/sh\n. "$(dirname "$0")/_/husky.sh"\n\n%s\n' "$husky_line" > "$husky_file"
+          printf '#!/bin/sh\n. "$(dirname "$0")/_/husky.sh"\n\n%s\n' "$husky_guard" > "$husky_file"
         else
           # husky v9+
-          printf '%s\n' "$husky_line" > "$husky_file"
+          printf '%s\n' "$husky_guard" > "$husky_file"
         fi
         chmod 755 "$husky_file"
         installed+=(".husky/pre-push")
