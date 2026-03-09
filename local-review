@@ -211,7 +211,7 @@ run_backend() {
       raw_file=$(mktemp)
       build_input "$prompt" "$diff_file" "$context_file" > "$input_file"
       # shellcheck disable=SC2086
-      $copilot_cmd -p "Read $input_file and follow its instructions exactly. Do not modify any files." \
+      $copilot_cmd -p "Read the file $input_file. It contains a complete code review request with instructions, file contents, and a diff. Perform the review as described in the file. All the data you need is in the file. Do not modify any files." \
         --allow-tool 'read_file' $flags > "$raw_file" 2>/dev/null
       rm -f "$input_file"
       # Strip tool-use lines and usage stats footer
