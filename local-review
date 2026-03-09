@@ -223,6 +223,25 @@ cmd_setup() {
   fi
 }
 
+# --- Subcommand: update ---
+
+cmd_update() {
+  if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
+    echo "Not a git checkout: $SCRIPT_DIR" >&2
+    echo "Update requires local-review installed via git clone." >&2
+    exit 1
+  fi
+
+  echo "Pulling latest changes..."
+  git -C "$SCRIPT_DIR" pull --ff-only || {
+    echo "Pull failed. Resolve manually in $SCRIPT_DIR" >&2
+    exit 1
+  }
+
+  # Re-exec the updated script's setup to refresh symlinks and commands
+  exec "$SCRIPT_DIR/local-review" setup
+}
+
 # --- Subcommand: install ---
 
 cmd_install() {
@@ -698,6 +717,7 @@ cmd_hook() {
 
 case "${1:-}" in
   setup)   shift; cmd_setup "$@" ;;
+  update)  shift; cmd_update "$@" ;;
   install) shift; cmd_install "$@" ;;
   review)  shift; cmd_review "$@" ;;
   hook)    shift; cmd_hook "$@" ;;
@@ -709,6 +729,7 @@ case "${1:-}" in
     echo ""
     echo "Commands:"
     echo "  setup    Install local-review for your user (~/.local/bin)"
+    echo "  update   Pull latest changes and re-run setup"
     echo "  install  Set up thin wrappers and config in current git repo"
     echo "  review   Run a code review (default command)"
     echo "  hook     Pre-push hook logic (called by git)"

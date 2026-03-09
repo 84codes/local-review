@@ -13,7 +13,11 @@ git clone git@github.com:84codes/local-review.git ~/.local/share/local-review
 
 This symlinks `local-review` into `~/.local/bin` and installs `/local-review` and `/local-review-fix` slash commands into `~/.claude/commands/` (Claude Code only). Make sure `~/.local/bin` is on your PATH.
 
-To update, `git pull` in `~/.local/share/local-review` and re-run `local-review setup`.
+To update:
+
+```sh
+local-review update
+```
 
 ## Repo setup
 
