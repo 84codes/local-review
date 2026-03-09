@@ -289,7 +289,17 @@ YAML
       fi
       ;;
     *)
-      install_wrapper ".git/hooks/pre-push" "$hook_wrapper"
+      local git_dir
+      git_dir=$(git -C "$root" rev-parse --git-dir)
+      local hook_dest="$git_dir/hooks/pre-push"
+      if [[ -f "$hook_dest" ]] && [[ "$force" != true ]]; then
+        : # already exists, skip silently
+      else
+        mkdir -p "$(dirname "$hook_dest")"
+        printf '%s\n' "$hook_wrapper" > "$hook_dest"
+        chmod 755 "$hook_dest"
+        installed+=("pre-push hook")
+      fi
       ;;
   esac
 
