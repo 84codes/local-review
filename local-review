@@ -8,6 +8,37 @@ PROG="local-review"
 VERSION="0.1.0"
 SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 
+# --- Update check ---
+
+check_for_updates() {
+  local install_dir="$SCRIPT_DIR"
+  # Only check if installed via git
+  git -C "$install_dir" rev-parse --is-inside-work-tree &>/dev/null || return 0
+
+  local stamp_file="$install_dir/.last-update-check"
+  local now
+  now=$(date +%s)
+
+  # Compare local vs remote (using last fetch)
+  local local_head remote_head
+  local_head=$(git -C "$install_dir" rev-parse HEAD 2>/dev/null) || return 0
+  remote_head=$(git -C "$install_dir" rev-parse origin/main 2>/dev/null) || return 0
+  if [[ "$local_head" != "$remote_head" ]]; then
+    echo "Update available. Run: local-review update" >&2
+  fi
+
+  # Background fetch if last check was >24h ago
+  local last_check=0
+  if [[ -f "$stamp_file" ]]; then
+    last_check=$(cat "$stamp_file")
+  fi
+  if (( now - last_check > 86400 )); then
+    printf '%s' "$now" > "$stamp_file"
+    git -C "$install_dir" fetch origin main --quiet &>/dev/null &
+    disown
+  fi
+}
+
 # --- Shared helpers ---
 
 find_repo_root() {
@@ -821,7 +852,7 @@ case "${1:-}" in
   setup)   shift; cmd_setup "$@" ;;
   update)  shift; cmd_update "$@" ;;
   install) shift; cmd_install "$@" ;;
-  review)  shift; cmd_review "$@" ;;
+  review)  shift; check_for_updates; cmd_review "$@" ;;
   hook)    shift; cmd_hook "$@" ;;
   -h|--help)
     echo "Usage: $PROG [OPTIONS] [PR_NUMBER]"
@@ -842,6 +873,7 @@ case "${1:-}" in
   --version) echo "$PROG $VERSION" ;;
   *)
     # Default to review for unrecognized args (flags, PR numbers, etc.)
+    check_for_updates
     cmd_review "$@"
     ;;
 esac
