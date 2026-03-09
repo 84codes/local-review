@@ -640,24 +640,14 @@ $criteria"
       context_file=$(build_file_context "$diff_file" "$root" "$base")
     fi
 
-    # Run review with elapsed time indicator
+    # Run review
     local output_file
     output_file=$(mktemp)
-    local start_time
-    start_time=$SECONDS
-    # Show elapsed time while backend runs
-    (
-      while true; do
-        sleep 1
-        printf "\rReviewing with %s... %ds" "$backend" "$((SECONDS - start_time))" >&2
-      done
-    ) &
-    local spinner_pid=$!
+    printf "Reviewing with %s...\n" "$backend" >&2
+    local start_time=$SECONDS
     run_backend "$backend" "$review_prompt" "$diff_file" "$root" "$model" "$context_file" > "$output_file"
     local rc=$?
-    kill "$spinner_pid" 2>/dev/null
-    wait "$spinner_pid" 2>/dev/null || true
-    printf "\rReviewing with %s... done (%ds)\n" "$backend" "$((SECONDS - start_time))" >&2
+    printf "Review complete (%ds)\n" "$((SECONDS - start_time))" >&2
     if (( rc != 0 )); then
       echo "Review failed ($backend exited $rc)" >&2
       rm -f "$diff_file" "$context_file" "$output_file"
