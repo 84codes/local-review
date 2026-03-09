@@ -34,7 +34,30 @@ resolve_backend() {
       return
     fi
   fi
-  # 4. Auto-detect: prefer claude, then others
+  # 4. Auto-detect from repo files (backend-specific files hint at preferred backend)
+  local -a file_hints=(
+    ".github/copilot-instructions.md:copilot"
+    "AGENTS.md:codex"
+    "GEMINI.md:gemini"
+    "CLAUDE.md:claude"
+    ".claude/CLAUDE.md:claude"
+  )
+  for entry in "${file_hints[@]}"; do
+    local file="${entry%%:*}" hint="${entry##*:}"
+    if [[ -f "$root/$file" ]]; then
+      case "$hint" in
+        copilot)
+          if command -v copilot &>/dev/null || command -v gh &>/dev/null; then
+            echo "$hint"; return
+          fi ;;
+        *)
+          if command -v "$hint" &>/dev/null; then
+            echo "$hint"; return
+          fi ;;
+      esac
+    fi
+  done
+  # 5. Fall back to first available CLI
   local -a candidates=(claude codex gemini opencode copilot)
   for cmd in "${candidates[@]}"; do
     case "$cmd" in
@@ -303,9 +326,14 @@ YAML
       ;;
   esac
 
-  # --- Review criteria file ---
-  # Auto-detect existing criteria, or create one
-  local criteria_path=""
+  # --- Detect defaults for interactive prompts ---
+
+  # Default backend: auto-detect from repo files, then installed CLIs
+  local default_backend
+  default_backend=$(resolve_backend "$root")
+
+  # Default criteria: check existing config, then known files
+  local default_criteria=""
   local -a known_criteria=(
     ".claude/review-criteria.md"
     ".github/copilot-instructions.md"
@@ -314,60 +342,71 @@ YAML
     "CLAUDE.md"
     ".claude/CLAUDE.md"
   )
-
-  # Check if CRITERIA is already configured
   if [[ -f "$root/.review-config" ]]; then
-    local existing
-    existing=$(grep -E '^CRITERIA=' "$root/.review-config" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')
-    if [[ -n "$existing" ]] && [[ -f "$root/$existing" ]]; then
-      criteria_path="$existing"
-      skipped+=("criteria ($criteria_path already configured in .review-config)")
-    fi
+    default_criteria=$(grep -E '^CRITERIA=' "$root/.review-config" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+    [[ -n "$default_criteria" ]] && [[ ! -f "$root/$default_criteria" ]] && default_criteria=""
   fi
-
-  # Auto-detect existing criteria files
-  if [[ -z "$criteria_path" ]]; then
+  if [[ -z "$default_criteria" ]]; then
     for candidate in "${known_criteria[@]}"; do
       if [[ -f "$root/$candidate" ]]; then
-        criteria_path="$candidate"
-        installed+=("criteria (auto-detected $criteria_path)")
+        default_criteria="$candidate"
         break
       fi
     done
   fi
 
-  # Nothing found: create default criteria file
-  if [[ -z "$criteria_path" ]]; then
-    criteria_path=".claude/review-criteria.md"
-    local dest_path="$root/$criteria_path"
+  # Default model: check existing config, then hardcoded default
+  local default_model="claude-sonnet-4-6"
+  if [[ -f "$root/.review-config" ]]; then
+    local existing_model
+    existing_model=$(grep -E '^MODEL=' "$root/.review-config" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+    [[ -n "$existing_model" ]] && default_model="$existing_model"
+  fi
+
+  # --- Prompt for configuration ---
+  echo ""
+  local chosen_backend chosen_criteria chosen_model
+
+  if [[ -n "$default_backend" ]]; then
+    printf "  Backend [%s]: " "$default_backend"
+  else
+    printf "  Backend (claude, codex, gemini, opencode, copilot): "
+  fi
+  read -r chosen_backend
+  chosen_backend="${chosen_backend:-$default_backend}"
+
+  if [[ -n "$default_criteria" ]]; then
+    printf "  Criteria [%s]: " "$default_criteria"
+  else
+    printf "  Criteria (path to review criteria file, or empty to create default): "
+  fi
+  read -r chosen_criteria
+  chosen_criteria="${chosen_criteria:-$default_criteria}"
+
+  printf "  Model [%s]: " "$default_model"
+  read -r chosen_model
+  chosen_model="${chosen_model:-$default_model}"
+
+  echo ""
+
+  # --- Create criteria file if needed ---
+  if [[ -z "$chosen_criteria" ]]; then
+    chosen_criteria=".claude/review-criteria.md"
+    local dest_path="$root/$chosen_criteria"
     if [[ -f "$dest_path" ]] && [[ "$force" != true ]]; then
-      skipped+=("$criteria_path (already exists)")
+      skipped+=("$chosen_criteria (already exists)")
     else
       mkdir -p "$(dirname "$dest_path")"
       cp "$SCRIPT_DIR/criteria.md" "$dest_path"
-      installed+=("$criteria_path")
+      installed+=("$chosen_criteria")
     fi
   fi
 
-  # --- .review-config ---
+  # --- Write .review-config ---
   local config_file="$root/.review-config"
-  if [[ ! -f "$config_file" ]]; then
-    printf 'CRITERIA=%s\nMODEL=claude-sonnet-4-6\n' "$criteria_path" > "$config_file"
-    installed+=(".review-config")
-  else
-    if ! grep -qE '^CRITERIA=' "$config_file"; then
-      printf '\nCRITERIA=%s\n' "$criteria_path" >> "$config_file"
-      installed+=(".review-config (added CRITERIA)")
-    else
-      skipped+=(".review-config CRITERIA (already set)")
-    fi
-    if ! grep -qE '^MODEL=' "$config_file"; then
-      printf 'MODEL=claude-sonnet-4-6\n' >> "$config_file"
-      installed+=(".review-config (added MODEL)")
-    else
-      skipped+=(".review-config MODEL (already set)")
-    fi
-  fi
+  printf 'REVIEWER=%s\nCRITERIA=%s\nMODEL=%s\n' \
+    "$chosen_backend" "$chosen_criteria" "$chosen_model" > "$config_file"
+  installed+=(".review-config")
 
   # --- Summary ---
   if [[ ${#installed[@]} -gt 0 ]]; then
@@ -377,14 +416,6 @@ YAML
   fi
   if [[ ${#installed[@]} -eq 0 ]]; then
     echo "Already configured, nothing to do."
-  fi
-
-  local backend
-  backend=$(resolve_backend "$root")
-  if [[ -n "$backend" ]]; then
-    echo "  backend: $backend (auto-detected)"
-  else
-    echo "  backend: none found (install claude, codex, gemini, opencode, or copilot)"
   fi
 }
 
