@@ -95,29 +95,47 @@ build_input() {
   local prompt="$1" diff_file="$2" context_file="${3:-}"
   printf '%s\n\n' "$prompt"
   if [[ -n "$context_file" ]] && [[ -s "$context_file" ]]; then
-    printf 'Changed files (full content for context):\n\n'
     cat "$context_file"
     printf '\n\n'
   fi
-  printf 'Diff to review:\n\n```diff\n'
+  printf 'Diff (showing what changed):\n\n```diff\n'
   cat "$diff_file"
   printf '```'
 }
 
 build_file_context() {
-  local diff_file="$1" root="$2"
+  local diff_file="$1" root="$2" base_ref="${3:-}"
   local context_file
   context_file=$(mktemp)
   local files
   files=$(grep -E '^\+\+\+ b/' "$diff_file" | sed 's|^+++ b/||')
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
-    [[ -f "$root/$file" ]] || continue
-    {
-      printf '=== %s ===\n```\n' "$file"
-      cat "$root/$file"
-      printf '\n```\n\n'
-    } >> "$context_file"
+    printf '=== %s ===\n\n' "$file" >> "$context_file"
+    # Base version (before changes)
+    if [[ -n "$base_ref" ]]; then
+      local base_content
+      base_content=$(git -C "$root" show "$base_ref:$file" 2>/dev/null) || base_content=""
+      if [[ -n "$base_content" ]]; then
+        {
+          printf 'Before:\n```\n'
+          printf '%s' "$base_content"
+          printf '\n```\n\n'
+        } >> "$context_file"
+      else
+        printf 'New file.\n\n' >> "$context_file"
+      fi
+    fi
+    # Head version (current)
+    if [[ -f "$root/$file" ]]; then
+      {
+        printf 'After:\n```\n'
+        cat "$root/$file"
+        printf '\n```\n\n'
+      } >> "$context_file"
+    else
+      printf 'File deleted.\n\n' >> "$context_file"
+    fi
   done <<< "$files"
   echo "$context_file"
 }
@@ -557,10 +575,10 @@ cmd_review() {
   fi
   local review_prompt
   if [[ "$backend" == "copilot" ]]; then
-    review_prompt="You are a code reviewer. Examine the diff and provide feedback on problems.
+    review_prompt="You are a code reviewer. You are given the before and after versions of each changed file, plus a diff showing what changed. Review the changes and provide feedback on problems.
 
 Think step by step:
-1. Examine the provided code change and file context.
+1. Read the full file content to understand context, then focus on the diff.
 2. Identify where the change introduces a problem or can be improved.
 3. Avoid commenting on correct code or commented-out code.
 4. Reply with an enumerated list. Each item must include: line number, file path, kind (bug, performance, consistency, naming, readability, style, other), severity (low, medium, high), and a clear explanation.
@@ -571,7 +589,7 @@ If no problems found, say \"No issues found.\"
 
 $criteria"
   else
-    review_prompt="Review the following diff and report ONLY problems that need fixing.
+    review_prompt="Review the following changes. You are given the before and after versions of each changed file, plus a diff showing what changed. Report ONLY problems that need fixing.
 
 $criteria"
   fi
@@ -611,10 +629,10 @@ $criteria"
       break
     fi
 
-    # Build file context for changed files
+    # Build file context for changed files (base + head versions)
     local context_file=""
     if [[ -z "$pr_number" ]]; then
-      context_file=$(build_file_context "$diff_file" "$root")
+      context_file=$(build_file_context "$diff_file" "$root" "$base")
     fi
 
     # Run review
