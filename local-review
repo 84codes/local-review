@@ -206,13 +206,20 @@ run_backend() {
       if [[ -n "$model" ]]; then
         flags="--model $model"
       fi
-      local input
-      input=$(build_input "$prompt" "$diff_file" "$context_file")
+      local input_file
+      input_file=$(mktemp)
+      build_input "$prompt" "$diff_file" "$context_file" > "$input_file"
       local raw_output
       # shellcheck disable=SC2086
-      raw_output=$($copilot_cmd -p "$input" $flags)
-      # Strip usage stats footer appended by gh copilot
-      echo "$raw_output" | sed '/^Total usage est:/,$d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
+      raw_output=$($copilot_cmd -p "Read $input_file and follow its instructions exactly. Do not modify any files." \
+        --allow-tool 'read_file' $flags)
+      rm -f "$input_file"
+      # Strip tool-use lines and usage stats footer appended by gh copilot
+      echo "$raw_output" \
+        | sed '/^● /d' \
+        | sed '/^  └ /d' \
+        | sed '/^Total usage est:/,$d' \
+        | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
       ;;
     *)
       echo "Unknown backend: $backend" >&2
