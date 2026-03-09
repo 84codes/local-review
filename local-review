@@ -206,16 +206,16 @@ run_backend() {
       if [[ -n "$model" ]]; then
         flags="--model $model"
       fi
-      local input_file raw_file
-      input_file=$(mktemp)
+      # copilot only accepts prompt as -p argument (no stdin),
+      # so skip file context to stay within ARG_MAX
+      local input
+      input=$(build_input "$prompt" "$diff_file" "")
+      local raw_file
       raw_file=$(mktemp)
-      build_input "$prompt" "$diff_file" "$context_file" > "$input_file"
       # shellcheck disable=SC2086
-      $copilot_cmd -p "Read the file $input_file. It contains a complete code review request with instructions, file contents, and a diff. Perform the review as described in the file. All the data you need is in the file. Do not modify any files." \
-        --allow-tool 'read_file' $flags > "$raw_file" 2>/dev/null
-      rm -f "$input_file"
-      # Strip tool-use lines and usage stats footer
-      sed '/^● /d; /^  └ /d; /^Total usage est:/,$d' "$raw_file" \
+      $copilot_cmd -p "$input" $flags > "$raw_file" 2>/dev/null
+      # Strip usage stats footer
+      sed '/^Total usage est:/,$d' "$raw_file" \
         | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
       rm -f "$raw_file"
       ;;
