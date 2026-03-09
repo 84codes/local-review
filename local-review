@@ -289,15 +289,7 @@ YAML
       fi
       ;;
     *)
-      install_wrapper ".githooks/pre-push" "$hook_wrapper"
-      local current_hooks
-      current_hooks=$(git -C "$root" config --get core.hooksPath 2>/dev/null || echo "")
-      if [[ "$current_hooks" != ".githooks" ]]; then
-        git -C "$root" config core.hooksPath .githooks
-        installed+=("git config core.hooksPath .githooks")
-      else
-        skipped+=("git config core.hooksPath (already set)")
-      fi
+      install_wrapper ".git/hooks/pre-push" "$hook_wrapper"
       ;;
   esac
 

@@ -29,13 +29,13 @@ Creates config files and a pre-push hook wrapper. Won't overwrite existing files
 
 | File | Purpose |
 |------|---------|
-| `.githooks/pre-push` | Hook wrapper (exits cleanly if local-review isn't installed) |
+| `.git/hooks/pre-push` | Hook wrapper (gitignored, per-developer) |
 | `.review-config` | Config: `CRITERIA=<path>`, `MODEL=`, and optional `REVIEWER=` |
 | `.claude/review-criteria.md` | Review criteria (only if no existing criteria file found) |
 
 The installer auto-detects existing criteria files in this order: `.claude/review-criteria.md`, `.github/copilot-instructions.md`, `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, `.claude/CLAUDE.md`. If one is found, it records the path in `.review-config`. If none exist, it creates `.claude/review-criteria.md` with sensible defaults.
 
-The generated hook wrapper includes a guard: if `local-review` isn't installed, the hook exits 0 and the push proceeds normally. This means the hook file can be committed to the repo without affecting developers who haven't installed local-review.
+The hook wrapper lives in `.git/hooks/`, which is gitignored by default. Each developer who wants the pre-push hook runs `local-review install` in the repo. The wrapper includes a guard: if `local-review` isn't on PATH, the hook exits 0 and the push proceeds normally.
 
 ### Hook manager integration
 
@@ -45,7 +45,7 @@ The installer detects existing hook managers:
 |---------|--------------|
 | **husky** (`.husky/` exists) | Creates/appends `.husky/pre-push` with guarded `local-review hook` call |
 | **overcommit** (`.overcommit.yml` exists) | Adds `PrePush: LocalReview` to `.overcommit.yml` |
-| **None** | Creates `.githooks/pre-push` + sets `git config core.hooksPath .githooks` |
+| **None** | Creates `.git/hooks/pre-push` (gitignored, per-developer) |
 
 ## Usage
 
