@@ -566,7 +566,12 @@ cmd_review() {
   fi
 
   local model
-  model=$(resolve_model "$model_flag" "$root")
+  if [[ -n "$reviewer_flag" ]] && [[ -z "$model_flag" ]]; then
+    # Backend was overridden; config model belongs to the config's backend
+    model=""
+  else
+    model=$(resolve_model "$model_flag" "$root")
+  fi
 
   local criteria
   if [[ -n "$criteria_flag" ]]; then
