@@ -655,7 +655,8 @@ $criteria"
     local spinner_pid=$!
     run_backend "$backend" "$review_prompt" "$diff_file" "$root" "$model" "$context_file" > "$output_file"
     local rc=$?
-    kill "$spinner_pid" 2>/dev/null; wait "$spinner_pid" 2>/dev/null
+    kill "$spinner_pid" 2>/dev/null
+    wait "$spinner_pid" 2>/dev/null || true
     printf "\rReviewing with %s... done (%ds)\n" "$backend" "$((SECONDS - start_time))" >&2
     if (( rc != 0 )); then
       echo "Review failed ($backend exited $rc)" >&2
