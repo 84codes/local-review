@@ -289,9 +289,9 @@ YAML
       fi
       ;;
     *)
-      local git_dir
-      git_dir=$(git -C "$root" rev-parse --git-dir)
-      local hook_dest="$git_dir/hooks/pre-push"
+      local git_common_dir
+      git_common_dir=$(git -C "$root" rev-parse --git-common-dir)
+      local hook_dest="$git_common_dir/hooks/pre-push"
       if [[ -f "$hook_dest" ]] && [[ "$force" != true ]]; then
         : # already exists, skip silently
       else
