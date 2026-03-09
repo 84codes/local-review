@@ -160,9 +160,13 @@ run_backend() {
           return 1
         fi
       fi
+      local flags=""
+      if [[ -n "$model" ]]; then
+        flags="--model $model"
+      fi
       # shellcheck disable=SC2086
       build_input "$prompt" "$diff_file" \
-        | $copilot_cmd
+        | $copilot_cmd -p $flags
       ;;
     *)
       echo "Unknown backend: $backend" >&2
@@ -375,14 +379,6 @@ YAML
     done
   fi
 
-  # Default model: check existing config, then hardcoded default
-  local default_model="claude-sonnet-4-6"
-  if [[ -f "$root/.review-config" ]]; then
-    local existing_model
-    existing_model=$(grep -E '^MODEL=' "$root/.review-config" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')
-    [[ -n "$existing_model" ]] && default_model="$existing_model"
-  fi
-
   # --- Prompt for configuration ---
   echo ""
   local chosen_backend chosen_criteria chosen_model
@@ -402,6 +398,18 @@ YAML
   fi
   read -r chosen_criteria
   chosen_criteria="${chosen_criteria:-$default_criteria}"
+
+  # Default model: check existing config, then pick per-backend default
+  local default_model=""
+  if [[ -f "$root/.review-config" ]]; then
+    default_model=$(grep -E '^MODEL=' "$root/.review-config" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+  fi
+  if [[ -z "$default_model" ]]; then
+    case "$chosen_backend" in
+      copilot) default_model="claude-sonnet-4.6" ;;
+      *)       default_model="claude-sonnet-4-6" ;;
+    esac
+  fi
 
   printf "  Model [%s]: " "$default_model"
   read -r chosen_model
