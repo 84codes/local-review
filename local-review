@@ -237,18 +237,20 @@ run_backend() {
       if [[ -n "$model" ]]; then
         flags="--model $model"
       fi
-      # copilot only accepts prompt as -p argument (no stdin),
-      # so skip file context to stay within ARG_MAX
-      local input
-      input=$(build_input "$prompt" "$diff_file" "")
+      # Write full input to a temp file so copilot can read it
+      # (copilot's -p flag has ARG_MAX limits, but it can read files)
+      local input_file
+      input_file=$(mktemp)
+      build_input "$prompt" "$diff_file" "$context_file" > "$input_file"
       local raw_file
       raw_file=$(mktemp)
       # shellcheck disable=SC2086
-      $copilot_cmd -p "$input" $flags > "$raw_file" 2>/dev/null
+      $copilot_cmd -p "Read $input_file and follow the instructions in it." \
+        --allow-all-paths $flags > "$raw_file" 2>/dev/null
       # Strip usage stats footer
       sed '/^Total usage est:/,$d' "$raw_file" \
         | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
-      rm -f "$raw_file"
+      rm -f "$raw_file" "$input_file"
       ;;
     *)
       echo "Unknown backend: $backend" >&2
@@ -615,25 +617,9 @@ cmd_review() {
     criteria=$(load_criteria "$root")
   fi
   local review_prompt
-  if [[ "$backend" == "copilot" ]]; then
-    review_prompt="You are a code reviewer. You are given the before and after versions of each changed file, plus a diff showing what changed. Review the changes and provide feedback on problems.
-
-Think step by step:
-1. Read the full file content to understand context, then focus on the diff.
-2. Identify where the change introduces a problem or can be improved.
-3. Avoid commenting on correct code or commented-out code.
-4. Reply with an enumerated list. Each item must include: line number, file path, kind (bug, performance, consistency, naming, readability, style, other), severity (low, medium, high), and a clear explanation.
-
-Format: 1. Line 42 in src/foo.js, bug, high severity: description of the problem.
-
-If no problems found, say \"No issues found.\"
+  review_prompt="Review the following changes. You are given the before and after versions of each changed file, plus a diff showing what changed. Report ONLY problems that need fixing.
 
 $criteria"
-  else
-    review_prompt="Review the following changes. You are given the before and after versions of each changed file, plus a diff showing what changed. Report ONLY problems that need fixing.
-
-$criteria"
-  fi
 
   local iteration=0
   while true; do
