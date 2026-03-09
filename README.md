@@ -118,7 +118,7 @@ Supports `claude`, `codex`, `gemini`, `opencode`, and `copilot` as backends. Sel
 
 | Backend | CLI | Non-interactive invocation | Can fix (`--fix`)? |
 |---------|-----|----------------------------|--------------------|
-| `claude` | `claude` | `claude -p` + model from `.claude/review-model` | Yes |
+| `claude` | `claude` | `claude -p` + model from `.review-config` | Yes |
 | `codex` | `codex` | `codex exec -` | Yes |
 | `gemini` | `gemini` | `gemini -p -` | Yes |
 | `opencode` | `opencode` | `opencode -p -q` | Yes |
