@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+command -v local-review &>/dev/null || exit 0
+exec local-review hook "$@"

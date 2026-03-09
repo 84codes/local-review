@@ -1,0 +1,2 @@
+CRITERIA=.claude/review-criteria.md
+MODEL=claude-sonnet-4-6

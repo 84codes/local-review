@@ -221,7 +221,7 @@ cmd_install() {
   local installed=()
   local skipped=()
 
-  # --- Thin wrapper: .githooks/pre-push ---
+  # --- Thin hook wrapper ---
   install_wrapper() {
     local dest="$root/$1" content="$2"
     if [[ -f "$dest" ]] && [[ "$force" != true ]]; then
