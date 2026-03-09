@@ -226,20 +226,21 @@ cmd_setup() {
 # --- Subcommand: update ---
 
 cmd_update() {
-  if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
-    echo "Not a git checkout: $SCRIPT_DIR" >&2
-    echo "Update requires local-review installed via git clone." >&2
+  local install_dir="${XDG_DATA_HOME:-$HOME/.local/share}/local-review"
+
+  if ! git -C "$install_dir" rev-parse --is-inside-work-tree &>/dev/null; then
+    echo "Not a git checkout: $install_dir" >&2
+    echo "Re-install with: git clone git@github.com:84codes/local-review.git $install_dir" >&2
     exit 1
   fi
 
-  echo "Pulling latest changes..."
-  git -C "$SCRIPT_DIR" pull --ff-only || {
-    echo "Pull failed. Resolve manually in $SCRIPT_DIR" >&2
+  echo "Pulling latest..."
+  git -C "$install_dir" pull --ff-only || {
+    echo "Pull failed. Resolve manually in $install_dir" >&2
     exit 1
   }
 
-  # Re-exec the updated script's setup to refresh symlinks and commands
-  exec "$SCRIPT_DIR/local-review" setup
+  exec "$install_dir/local-review" setup
 }
 
 # --- Subcommand: install ---
