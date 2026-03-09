@@ -406,12 +406,16 @@ YAML
   fi
   if [[ -z "$default_model" ]]; then
     case "$chosen_backend" in
-      copilot) default_model="claude-sonnet-4.6" ;;
+      copilot) ;;  # let copilot pick its own default
       *)       default_model="claude-sonnet-4-6" ;;
     esac
   fi
 
-  printf "  Model [%s]: " "$default_model"
+  if [[ -n "$default_model" ]]; then
+    printf "  Model [%s]: " "$default_model"
+  else
+    printf "  Model (optional): "
+  fi
   read -r chosen_model
   chosen_model="${chosen_model:-$default_model}"
 
