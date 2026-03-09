@@ -206,20 +206,18 @@ run_backend() {
       if [[ -n "$model" ]]; then
         flags="--model $model"
       fi
-      local input_file
+      local input_file raw_file
       input_file=$(mktemp)
+      raw_file=$(mktemp)
       build_input "$prompt" "$diff_file" "$context_file" > "$input_file"
-      local raw_output
       # shellcheck disable=SC2086
-      raw_output=$($copilot_cmd -p "Read $input_file and follow its instructions exactly. Do not modify any files." \
-        --allow-tool 'read_file' $flags)
+      $copilot_cmd -p "Read $input_file and follow its instructions exactly. Do not modify any files." \
+        --allow-tool 'read_file' $flags > "$raw_file" 2>/dev/null
       rm -f "$input_file"
-      # Strip tool-use lines and usage stats footer appended by gh copilot
-      echo "$raw_output" \
-        | sed '/^● /d' \
-        | sed '/^  └ /d' \
-        | sed '/^Total usage est:/,$d' \
+      # Strip tool-use lines and usage stats footer
+      sed '/^● /d; /^  └ /d; /^Total usage est:/,$d' "$raw_file" \
         | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
+      rm -f "$raw_file"
       ;;
     *)
       echo "Unknown backend: $backend" >&2
@@ -642,25 +640,37 @@ $criteria"
       context_file=$(build_file_context "$diff_file" "$root" "$base")
     fi
 
-    # Run review
-    printf "Reviewing with %s..." "$backend" >&2
-    local output
-    output=$(run_backend "$backend" "$review_prompt" "$diff_file" "$root" "$model" "$context_file") || {
-      printf "\n" >&2
-      echo "Review failed ($backend exited $?)" >&2
-      rm -f "$diff_file" "$context_file"
+    # Run review with elapsed time indicator
+    local output_file
+    output_file=$(mktemp)
+    local start_time
+    start_time=$SECONDS
+    # Show elapsed time while backend runs
+    (
+      while true; do
+        sleep 1
+        printf "\rReviewing with %s... %ds" "$backend" "$((SECONDS - start_time))" >&2
+      done
+    ) &
+    local spinner_pid=$!
+    run_backend "$backend" "$review_prompt" "$diff_file" "$root" "$model" "$context_file" > "$output_file"
+    local rc=$?
+    kill "$spinner_pid" 2>/dev/null; wait "$spinner_pid" 2>/dev/null
+    printf "\rReviewing with %s... done (%ds)\n" "$backend" "$((SECONDS - start_time))" >&2
+    if (( rc != 0 )); then
+      echo "Review failed ($backend exited $rc)" >&2
+      rm -f "$diff_file" "$context_file" "$output_file"
       exit 1
-    }
-    printf " done\n" >&2
+    fi
     rm -f "$diff_file" "$context_file"
 
     # Display output
     if [[ "$raw" == true ]]; then
-      echo "$output"
+      cat "$output_file"
     elif [[ -t 1 ]] && command -v glow &>/dev/null; then
-      echo "$output" | glow --pager -
+      glow --pager - < "$output_file"
     else
-      echo "$output"
+      cat "$output_file"
       if [[ -t 1 ]]; then
         echo "(tip: install glow for rendered markdown output)" >&2
       fi
@@ -668,17 +678,20 @@ $criteria"
 
     # Without --fix, single pass and done
     if [[ "$fix" != true ]]; then
+      rm -f "$output_file"
       break
     fi
 
     # Check if clean
-    if echo "$output" | grep -qF "No issues found"; then
+    if grep -qF "No issues found" "$output_file"; then
+      rm -f "$output_file"
       echo "Clean after $iteration iteration(s)."
       break
     fi
 
     if (( iteration >= max_iterations )); then
       echo "Reached max iterations ($max_iterations). Issues may remain."
+      rm -f "$output_file"
       break
     fi
 
@@ -687,7 +700,8 @@ $criteria"
     local fix_prompt
     fix_prompt=$(printf '%s\n\n%s' \
       "Fix the following review findings in the codebase. Edit the files directly. Do not explain, just fix. If a finding is a false positive, skip it." \
-      "$output")
+      "$(cat "$output_file")")
+    rm -f "$output_file"
     case "$backend" in
       claude)
         unset CLAUDECODE
