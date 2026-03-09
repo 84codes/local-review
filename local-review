@@ -164,9 +164,10 @@ run_backend() {
       if [[ -n "$model" ]]; then
         flags="--model $model"
       fi
+      local input
+      input=$(build_input "$prompt" "$diff_file")
       # shellcheck disable=SC2086
-      build_input "$prompt" "$diff_file" \
-        | $copilot_cmd -p $flags
+      $copilot_cmd -p "$input" $flags
       ;;
     *)
       echo "Unknown backend: $backend" >&2
