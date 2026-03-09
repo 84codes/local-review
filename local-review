@@ -648,7 +648,11 @@ $criteria"
     # Run review
     local output_file
     output_file=$(mktemp)
-    printf "Reviewing with %s...\n" "$backend" >&2
+    if [[ -n "$model" ]]; then
+      printf "Reviewing with %s (%s)...\n" "$backend" "$model" >&2
+    else
+      printf "Reviewing with %s...\n" "$backend" >&2
+    fi
     local start_time=$SECONDS
     run_backend "$backend" "$review_prompt" "$diff_file" "$root" "$model" "$context_file" > "$output_file"
     local rc=$?
