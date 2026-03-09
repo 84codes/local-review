@@ -568,12 +568,15 @@ $criteria"
     fi
 
     # Run review
+    printf "Reviewing with %s..." "$backend" >&2
     local output
     output=$(run_backend "$backend" "$review_prompt" "$diff_file" "$root" "$model") || {
+      printf "\n" >&2
       echo "Review failed ($backend exited $?)" >&2
       rm -f "$diff_file"
       exit 1
     }
+    printf " done\n" >&2
     rm -f "$diff_file"
 
     # Display output
