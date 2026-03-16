@@ -184,14 +184,8 @@ run_backend() {
       if [[ -n "$model" ]]; then
         flags="--model $model"
       fi
-      local raw_file
-      raw_file=$(mktemp)
       # shellcheck disable=SC2086
-      $copilot_cmd -p "$prompt" --allow-all-tools $flags > "$raw_file" 2>/dev/null
-      # Strip usage stats footer
-      sed '/^Total usage est:/,$d' "$raw_file" \
-        | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'
-      rm -f "$raw_file"
+      $copilot_cmd -p "$prompt" --allow-all -s $flags
       ;;
     *)
       echo "Unknown backend: $backend" >&2
@@ -521,11 +515,6 @@ cmd_review() {
     exit 1
   fi
 
-  if [[ "$fix" == true ]] && [[ "$backend" == "copilot" ]]; then
-    echo "The --fix flag requires an agentic backend (claude, codex, gemini, opencode)." >&2
-    exit 1
-  fi
-
   local main_branch="${REVIEW_BASE_BRANCH:-main}"
 
   # For --fix with a PR number, checkout the branch first
@@ -661,6 +650,12 @@ $criteria"
         ;;
       opencode)
         printf '%s' "$fix_prompt" | opencode -p -q
+        ;;
+      copilot)
+        local copilot_cmd="copilot"
+        command -v copilot &>/dev/null || copilot_cmd="gh copilot"
+        # shellcheck disable=SC2086
+        printf '%s' "$fix_prompt" | $copilot_cmd --allow-all -s
         ;;
     esac || {
       echo "Fix step failed." >&2
