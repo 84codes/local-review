@@ -126,7 +126,7 @@ Supports `claude`, `codex`, `gemini`, `opencode`, and `copilot` as backends. Sel
 | `codex` | `codex` | `codex exec -` | Yes |
 | `gemini` | `gemini` | `gemini -p -` | Yes |
 | `opencode` | `opencode` | `opencode -p -q` | Yes |
-| `copilot` | `copilot` / `gh copilot` | Pipes to stdin | No (review only) |
+| `copilot` | `copilot` / `gh copilot` | `copilot -p --allow-all -s` | Yes |
 
 ## Configuration
 
